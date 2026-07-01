@@ -881,6 +881,24 @@ with tab2:
         has_grade = GRADE_COL in df_penjualan.columns
         has_jenis = JENIS_COL in df_penjualan.columns
 
+        # ── RINGKASAN TONNASE (paling atas) ───────────────────────────────────
+        if has_kg:
+            df_ton_all = df_penjualan.copy()
+            df_ton_all[KG_COL] = to_number(df_ton_all[KG_COL])
+            if "Is_Dibuang" in df_ton_all.columns:
+                total_kg_terjual = df_ton_all[df_ton_all["Is_Dibuang"] == False][KG_COL].sum()
+                total_kg_dibuang = df_ton_all[df_ton_all["Is_Dibuang"] == True][KG_COL].sum()
+            else:
+                total_kg_terjual = df_ton_all[KG_COL].sum()
+                total_kg_dibuang = 0
+            total_kg_semua = df_ton_all[KG_COL].sum()
+
+            ton1, ton2, ton3 = st.columns(3)
+            ton1.metric("⚖️ Total Tonnase Terjual", f"{total_kg_terjual:,.1f} KG")
+            ton2.metric("🗑️ Total Tonnase Dibuang", f"{total_kg_dibuang:,.1f} KG")
+            ton3.metric("📦 Total Tonnase Keseluruhan", f"{total_kg_semua:,.1f} KG")
+            st.divider()
+
         with st.expander("🔍 Debug: Kolom PENJUALAN LAPAK", expanded=False):
             st.write("Kolom tersedia:", list(df_penjualan.columns))
             st.write("Baris data:", len(df_penjualan))
