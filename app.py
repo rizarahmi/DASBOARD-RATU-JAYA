@@ -2085,12 +2085,43 @@ with tab8:
 # ===========================================================
 # TAB 9: PREDIKSI HARGA (Analisis & Prediksi Tren Harga)
 # ===========================================================
+# Sumber data: Google Spreadsheet "harga harian"
+PRED_SPREADSHEET_ID = "1izW66Dv1H7XINUHJonwtJWNUo7BO9CjRkYU-LxEe6N0"
+
+@st.cache_data(ttl=300, show_spinner="Memuat data harga harian...")
+def load_data_harga_prediksi() -> pd.DataFrame:
+    url = f"https://docs.google.com/spreadsheets/d/{PRED_SPREADSHEET_ID}/gviz/tq?tqx=out:csv"
+    try:
+        df = pd.read_csv(url, dtype=str)
+    except Exception as e:
+        st.error(f"Gagal membaca spreadsheet harga harian: {e}")
+        return pd.DataFrame()
+    df.columns = [str(c).strip().upper() for c in df.columns]
+    if "TANGGAL" not in df.columns or "HARGA" not in df.columns:
+        st.error("Spreadsheet harga harian harus memiliki kolom 'TANGGAL' dan 'HARGA'.")
+        return pd.DataFrame()
+    # Format tanggal di sheet: M/D/YYYY (contoh 10/19/2022)
+    df["TANGGAL"] = pd.to_datetime(df["TANGGAL"], format="%m/%d/%Y", errors="coerce")
+    mask_nat = df["TANGGAL"].isna()
+    if mask_nat.any():
+        # fallback untuk format tanggal lain
+        raw = pd.read_csv(url, dtype=str)
+        raw.columns = [str(c).strip().upper() for c in raw.columns]
+        df.loc[mask_nat, "TANGGAL"] = pd.to_datetime(raw.loc[mask_nat, "TANGGAL"], dayfirst=False, errors="coerce")
+    df = df[df["TANGGAL"].notna()].reset_index(drop=True)
+    # HARGA bisa berformat "3.300" (titik ribuan) → gunakan parser to_number
+    df["HARGA"] = to_number(df["HARGA"])
+    if "MBG" in df.columns:
+        df["MBG"] = pd.to_numeric(df["MBG"], errors="coerce")
+    return df.sort_values("TANGGAL").reset_index(drop=True)
+
+
 with tab9:
     st.markdown("### 🔮 Analisis & Prediksi Tren Harga")
     st.caption(
-        "Unggah data historis harga (Excel), pilih model, dan lihat prediksi tren ke depan. "
-        "Fitur ini berdiri sendiri — datanya dari file yang Anda unggah, bukan dari Google Sheets, "
-        "dan TIDAK terpengaruh filter tanggal di sidebar."
+        "Data harga diambil otomatis dari Google Spreadsheet **\"harga harian\"** "
+        "(kolom TANGGAL, HARGA, MBG). Fitur ini berdiri sendiri dan TIDAK terpengaruh "
+        "filter tanggal di sidebar. Gunakan tombol 🔄 Refresh Data di sidebar untuk memuat ulang data terbaru."
     )
 
     if not HAS_LGBM and not HAS_PROPHET:
@@ -2108,9 +2139,9 @@ with tab9:
         with st.container(border=True):
             st.markdown('<div class="income-card-title">🎛️ Pengaturan Prediksi</div>', unsafe_allow_html=True)
 
-            pred_file = st.file_uploader(
-                "Unggah File Excel Data Harga (wajib ada kolom 'TANGGAL' dan 'HARGA')",
-                type=["xlsx", "xls"], key="pred_upload"
+            st.markdown(
+                "📄 **Sumber data:** Google Spreadsheet *harga harian* — "
+                "edit data langsung di spreadsheet, lalu klik 🔄 Refresh Data di sidebar."
             )
 
             model_opts = []
@@ -2136,18 +2167,12 @@ with tab9:
 
         future_mbg_value = 1
 
-        if pred_file is None:
-            st.info("Silakan unggah file data historis berformat Excel (.xlsx) di atas untuk memulai prediksi.")
+        dfp_raw = load_data_harga_prediksi()
+
+        if dfp_raw.empty:
+            st.info("Data harga harian belum bisa dimuat dari spreadsheet. Periksa akses spreadsheet lalu klik 🔄 Refresh Data.")
         else:
             try:
-                dfp_raw = pd.read_excel(pred_file)
-                dfp_raw.columns = dfp_raw.columns.str.strip().str.upper()
-
-                if "TANGGAL" not in dfp_raw.columns or "HARGA" not in dfp_raw.columns:
-                    st.error("Format berkas salah! Pastikan berkas memiliki kolom 'TANGGAL' dan 'HARGA'.")
-                    st.stop()
-
-                dfp_raw["TANGGAL"] = pd.to_datetime(dfp_raw["TANGGAL"])
                 dfp_raw = dfp_raw.sort_values("TANGGAL").reset_index(drop=True)
 
                 # Memisahkan data historis dengan data target prediksi masa depan
@@ -2156,7 +2181,7 @@ with tab9:
 
                 # Mekanisme sinkronisasi dengan slider durasi
                 if len(dfp_future_input) == 0:
-                    st.info("💡 Tidak mendeteksi struktur baris kosong di Excel. Menggunakan generate otomatis berdasarkan durasi di pengaturan.")
+                    st.info("💡 Tidak ada baris berisi tanggal tanpa harga di spreadsheet. Tanggal prediksi digenerate otomatis sesuai durasi di pengaturan.")
                     last_date = dfp_known["TANGGAL"].max()
                     future_dates = pd.date_range(start=last_date + timedelta(days=1), periods=forecast_horizon)
                     dfp_future_input = pd.DataFrame({"TANGGAL": future_dates})
@@ -2164,7 +2189,7 @@ with tab9:
                 else:
                     if len(dfp_future_input) >= forecast_horizon:
                         dfp_future_input = dfp_future_input.iloc[:forecast_horizon].reset_index(drop=True)
-                        st.success(f"✅ Mengambil {forecast_horizon} hari teratas dari baris kosong di file Excel Anda.")
+                        st.success(f"✅ Mengambil {forecast_horizon} hari teratas dari baris tanpa harga di spreadsheet.")
                     else:
                         deficit = forecast_horizon - len(dfp_future_input)
                         last_date = dfp_future_input["TANGGAL"].max() if len(dfp_future_input) > 0 else dfp_known["TANGGAL"].max()
@@ -2174,13 +2199,13 @@ with tab9:
                         dfp_extra["MBG"] = future_mbg_value
 
                         dfp_future_input = pd.concat([dfp_future_input, dfp_extra], ignore_index=True)
-                        st.warning(f"⚠️ Baris kosong di Excel kurang. {len(dfp_future_input) - deficit} hari diambil dari Excel, {deficit} hari digenerate otomatis.")
+                        st.warning(f"⚠️ Baris tanpa harga di spreadsheet kurang. {len(dfp_future_input) - deficit} hari diambil dari spreadsheet, {deficit} hari digenerate otomatis.")
 
                 # Validasi pengisian parameter kolom MBG
                 if use_mbg:
                     if "MBG" not in dfp_raw.columns:
                         st.error(
-                            "Kolom 'MBG' tidak ditemukan pada berkas Anda. Tambahkan kolom 'MBG' "
+                            "Kolom 'MBG' tidak ditemukan pada spreadsheet harga harian. Tambahkan kolom 'MBG' "
                             "berisi 0 (tidak ada pengaruh) atau 1 (ada pengaruh) pada setiap baris data, "
                             "atau matikan opsi 'Gunakan Variabel Pengaruh MBG'."
                         )
