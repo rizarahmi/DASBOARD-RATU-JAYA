@@ -3,8 +3,24 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
-from datetime import datetime
+from datetime import datetime, timedelta
 import urllib.parse
+import warnings
+
+warnings.filterwarnings("ignore")
+
+# --- Library prediksi (opsional; tab Prediksi tetap jalan kalau salah satu ada) ---
+try:
+    from lightgbm import LGBMRegressor
+    HAS_LGBM = True
+except ImportError:
+    HAS_LGBM = False
+
+try:
+    from prophet import Prophet
+    HAS_PROPHET = True
+except ImportError:
+    HAS_PROPHET = False
 
 # ============================================================
 # KONFIGURASI HALAMAN
@@ -246,6 +262,94 @@ def pad_yaxis(fig, max_value, pad: float = 0.22):
         fig.update_yaxes(range=[0, max_value * (1 + pad)])
     fig.update_traces(cliponaxis=False)
     return fig
+
+# ============================================================
+# ENGINE PREDIKSI HARGA (untuk Tab 🔮 Prediksi Harga)
+# ============================================================
+# Parameter model SUDAH DITENTUKAN (fixed) — dipilih untuk data harga
+# yang fluktuatif: responsif terhadap pergerakan tapi tidak overfit noise.
+LGB_PARAMS = dict(n_estimators=500, learning_rate=0.03, max_depth=5)
+PROPHET_PARAMS = dict(yearly_seasonality=True, weekly_seasonality=True, changepoint_prior_scale=0.15)
+
+def create_time_features(df):
+    df = df.copy()
+    dow = df["TANGGAL"].dt.dayofweek
+    doy = df["TANGGAL"].dt.dayofyear
+    df["DOW_SIN"] = np.sin(2 * np.pi * dow / 7)
+    df["DOW_COS"] = np.cos(2 * np.pi * dow / 7)
+    df["DOY_SIN"] = np.sin(2 * np.pi * doy / 365.25)
+    df["DOY_COS"] = np.cos(2 * np.pi * doy / 365.25)
+    return df
+
+@st.cache_data(show_spinner=False)
+def run_lightgbm(df_known, df_future, use_mbg=False):
+    df_feat = create_time_features(df_known)
+
+    for i in range(1, 8):
+        df_feat[f"LAG_{i}"] = df_feat["HARGA"].shift(i)
+    df_feat["TARGET_DELTA"] = df_feat["HARGA"] - df_feat["LAG_1"]
+
+    feature_cols = [f"LAG_{i}" for i in range(1, 8)] + ["DOW_SIN", "DOW_COS", "DOY_SIN", "DOY_COS"]
+    if use_mbg:
+        feature_cols.append("MBG")
+
+    df_train = df_feat.dropna(subset=feature_cols + ["TARGET_DELTA"]).reset_index(drop=True)
+
+    model = LGBMRegressor(**LGB_PARAMS, random_state=42, verbose=-1)
+    model.fit(df_train[feature_cols], df_train["TARGET_DELTA"])
+
+    history_prices = list(df_feat["HARGA"].values[-7:])
+
+    df_future_feat = create_time_features(df_future).reset_index(drop=True)
+    future_dates = df_future_feat["TANGGAL"].values
+
+    predictions = []
+    for idx in range(len(future_dates)):
+        row = {f"LAG_{i}": history_prices[-i] for i in range(1, 8)}
+        row["DOW_SIN"] = df_future_feat.loc[idx, "DOW_SIN"]
+        row["DOW_COS"] = df_future_feat.loc[idx, "DOW_COS"]
+        row["DOY_SIN"] = df_future_feat.loc[idx, "DOY_SIN"]
+        row["DOY_COS"] = df_future_feat.loc[idx, "DOY_COS"]
+        if use_mbg:
+            row["MBG"] = df_future_feat.loc[idx, "MBG"]
+
+        x_pred = pd.DataFrame([row])[feature_cols]
+        pred_delta = model.predict(x_pred)[0]
+        pred_val = history_prices[-1] + float(pred_delta)
+
+        predictions.append(pred_val)
+        history_prices.append(pred_val)
+
+    return pd.DataFrame({"TANGGAL": future_dates, "PREDIKSI": np.round(predictions, 2)})
+
+@st.cache_data(show_spinner=False)
+def run_prophet(df_known, df_future, use_mbg=False):
+    df_p = df_known.rename(columns={"TANGGAL": "ds", "HARGA": "y"})
+    model = Prophet(daily_seasonality=False, **PROPHET_PARAMS)
+
+    cols = ["ds", "y"]
+    if use_mbg:
+        model.add_regressor("MBG")
+        cols.append("MBG")
+    model.fit(df_p[cols])
+
+    df_p_hist = df_known[["TANGGAL"]].rename(columns={"TANGGAL": "ds"})
+    if use_mbg:
+        df_p_hist["MBG"] = df_known["MBG"]
+
+    df_p_fut = df_future[["TANGGAL"]].rename(columns={"TANGGAL": "ds"})
+    if use_mbg:
+        df_p_fut["MBG"] = df_future["MBG"]
+
+    future = pd.concat([df_p_hist, df_p_fut], ignore_index=True)
+
+    forecast = model.predict(future)
+    future_only = forecast.tail(len(df_future))
+
+    return pd.DataFrame({
+        "TANGGAL": pd.to_datetime(future_only["ds"]),
+        "PREDIKSI": np.round(future_only["yhat"].values, 2)
+    })
 
 # ============================================================
 # BACA G-SHEETS
@@ -749,7 +853,7 @@ st.divider()
 # ============================================================
 # TABS
 # ============================================================
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
     "💰 Pendapatan",
     "🏪 Analisa Lapak",
     "🌱 Tanaman",
@@ -758,6 +862,7 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
     "💸 Arus Kas",
     "🚛 Ekspedisi",
     "🏭 Kerugian Gudang",
+    "🔮 Prediksi Harga",
 ])
 
 # ===========================================================
@@ -1975,3 +2080,246 @@ with tab8:
         st.markdown(f"**Total Data: {len(df_kerugian_gudang_raw)} baris**")
         # [CHANGE 1] kolom uang ditampilkan dalam format Rupiah
         st.dataframe(format_money_table(df_kerugian_gudang_raw), use_container_width=True, hide_index=True)
+
+
+# ===========================================================
+# TAB 9: PREDIKSI HARGA (Analisis & Prediksi Tren Harga)
+# ===========================================================
+with tab9:
+    st.markdown("### 🔮 Analisis & Prediksi Tren Harga")
+    st.caption(
+        "Unggah data historis harga (Excel), pilih model, dan lihat prediksi tren ke depan. "
+        "Fitur ini berdiri sendiri — datanya dari file yang Anda unggah, bukan dari Google Sheets, "
+        "dan TIDAK terpengaruh filter tanggal di sidebar."
+    )
+
+    if not HAS_LGBM and not HAS_PROPHET:
+        st.error(
+            "Library prediksi belum terpasang di server. Jalankan perintah berikut lalu restart aplikasi:\n\n"
+            "```\npip install lightgbm prophet openpyxl\n```"
+        )
+    else:
+        if not HAS_LGBM:
+            st.warning("Library `lightgbm` belum terpasang — hanya model Prophet yang tersedia.")
+        if not HAS_PROPHET:
+            st.warning("Library `prophet` belum terpasang — hanya model LightGBM yang tersedia.")
+
+        # ── PENGATURAN PREDIKSI (di dalam tab, bukan sidebar) ────────────────
+        with st.container(border=True):
+            st.markdown('<div class="income-card-title">🎛️ Pengaturan Prediksi</div>', unsafe_allow_html=True)
+
+            pred_file = st.file_uploader(
+                "Unggah File Excel Data Harga (wajib ada kolom 'TANGGAL' dan 'HARGA')",
+                type=["xlsx", "xls"], key="pred_upload"
+            )
+
+            model_opts = []
+            if HAS_LGBM:    model_opts.append("LightGBM (Tree-Based)")
+            if HAS_PROPHET: model_opts.append("Prophet (Seasonal Trend)")
+
+            pc1, pc2 = st.columns(2)
+            chosen_model = pc1.selectbox("Pilih Model Prediksi", model_opts, key="pred_model")
+            forecast_horizon = pc2.slider("Durasi Hari Prediksi", min_value=7, max_value=180, value=116, step=1, key="pred_horizon")
+
+            pc3, pc4, pc5 = st.columns(3)
+            use_mbg = pc3.checkbox(
+                "Gunakan Variabel Pengaruh MBG", value=False, key="pred_mbg",
+                help="Jika aktif, model memakai kolom 'MBG' pada data Anda (0 = tidak ada pengaruh, 1 = ada pengaruh) sebagai regressor tambahan."
+            )
+            show_hist_toggle = pc4.checkbox("Tampilkan Data Historis", value=True, key="pred_show_hist")
+            show_pred_toggle = pc5.checkbox("Tampilkan Hasil Prediksi", value=True, key="pred_show_pred")
+
+            st.caption(
+                "ℹ️ Parameter model (jumlah pohon, learning rate, fleksibilitas tren) sudah ditentukan otomatis "
+                "berdasarkan karakteristik data harga yang fluktuatif, jadi tidak perlu diatur manual."
+            )
+
+        future_mbg_value = 1
+
+        if pred_file is None:
+            st.info("Silakan unggah file data historis berformat Excel (.xlsx) di atas untuk memulai prediksi.")
+        else:
+            try:
+                dfp_raw = pd.read_excel(pred_file)
+                dfp_raw.columns = dfp_raw.columns.str.strip().str.upper()
+
+                if "TANGGAL" not in dfp_raw.columns or "HARGA" not in dfp_raw.columns:
+                    st.error("Format berkas salah! Pastikan berkas memiliki kolom 'TANGGAL' dan 'HARGA'.")
+                    st.stop()
+
+                dfp_raw["TANGGAL"] = pd.to_datetime(dfp_raw["TANGGAL"])
+                dfp_raw = dfp_raw.sort_values("TANGGAL").reset_index(drop=True)
+
+                # Memisahkan data historis dengan data target prediksi masa depan
+                dfp_known = dfp_raw[dfp_raw["HARGA"].notna()].reset_index(drop=True)
+                dfp_future_input = dfp_raw[dfp_raw["HARGA"].isna()].reset_index(drop=True)
+
+                # Mekanisme sinkronisasi dengan slider durasi
+                if len(dfp_future_input) == 0:
+                    st.info("💡 Tidak mendeteksi struktur baris kosong di Excel. Menggunakan generate otomatis berdasarkan durasi di pengaturan.")
+                    last_date = dfp_known["TANGGAL"].max()
+                    future_dates = pd.date_range(start=last_date + timedelta(days=1), periods=forecast_horizon)
+                    dfp_future_input = pd.DataFrame({"TANGGAL": future_dates})
+                    dfp_future_input["MBG"] = future_mbg_value
+                else:
+                    if len(dfp_future_input) >= forecast_horizon:
+                        dfp_future_input = dfp_future_input.iloc[:forecast_horizon].reset_index(drop=True)
+                        st.success(f"✅ Mengambil {forecast_horizon} hari teratas dari baris kosong di file Excel Anda.")
+                    else:
+                        deficit = forecast_horizon - len(dfp_future_input)
+                        last_date = dfp_future_input["TANGGAL"].max() if len(dfp_future_input) > 0 else dfp_known["TANGGAL"].max()
+
+                        extra_dates = pd.date_range(start=last_date + timedelta(days=1), periods=deficit)
+                        dfp_extra = pd.DataFrame({"TANGGAL": extra_dates})
+                        dfp_extra["MBG"] = future_mbg_value
+
+                        dfp_future_input = pd.concat([dfp_future_input, dfp_extra], ignore_index=True)
+                        st.warning(f"⚠️ Baris kosong di Excel kurang. {len(dfp_future_input) - deficit} hari diambil dari Excel, {deficit} hari digenerate otomatis.")
+
+                # Validasi pengisian parameter kolom MBG
+                if use_mbg:
+                    if "MBG" not in dfp_raw.columns:
+                        st.error(
+                            "Kolom 'MBG' tidak ditemukan pada berkas Anda. Tambahkan kolom 'MBG' "
+                            "berisi 0 (tidak ada pengaruh) atau 1 (ada pengaruh) pada setiap baris data, "
+                            "atau matikan opsi 'Gunakan Variabel Pengaruh MBG'."
+                        )
+                        st.stop()
+                    dfp_known["MBG"] = pd.to_numeric(dfp_known["MBG"], errors="coerce").fillna(0).clip(0, 1).round().astype(int)
+                    dfp_future_input["MBG"] = pd.to_numeric(dfp_future_input["MBG"], errors="coerce").fillna(0).clip(0, 1).round().astype(int)
+                else:
+                    dfp_known["MBG"] = 0
+                    dfp_future_input["MBG"] = 0
+
+                # Ekstraksi komponen waktu untuk visualisasi grafik analisis
+                dfp_known["TAHUN"] = dfp_known["TANGGAL"].dt.year
+                dfp_known["HARI_KE"] = dfp_known["TANGGAL"].dt.dayofyear
+
+                # Informasi Ringkas (KPI Metrics Card)
+                pm1, pm2, pm3 = st.columns(3)
+                with pm1:
+                    st.metric("Total Data Historis", f"{len(dfp_known)} Hari")
+                with pm2:
+                    st.metric("Harga Terakhir", f"{dfp_known['HARGA'].iloc[-1]:.2f}")
+                with pm3:
+                    st.metric("Target Jangka Waktu", f"{forecast_horizon} Hari")
+
+                if use_mbg:
+                    st.caption("✅ Variabel MBG **disertakan** sebagai regressor tambahan pada model berdasarkan data baris masa depan.")
+                else:
+                    st.caption("ℹ️ Variabel MBG **tidak** disertakan dalam model (opsi nonaktif).")
+
+                # Eksekusi Model Terpilih (parameter sudah fixed)
+                with st.spinner("Sedang melatih model..."):
+                    if "LightGBM" in chosen_model:
+                        dfp_forecast = run_lightgbm(dfp_known, dfp_future_input, use_mbg)
+                    else:
+                        dfp_forecast = run_prophet(dfp_known, dfp_future_input, use_mbg)
+
+                # SUB-TAB INTERAKTIF
+                pred_tab_tren, pred_tab_yoy, pred_tab_data = st.tabs([
+                    "📈 Grafik Tren Utama",
+                    "📅 Perbandingan Tiap Tahun (YoY)",
+                    "📋 Tabel Data Hasil"
+                ])
+
+                # SUB-TAB 1: GRAFIK TREN UTAMA
+                with pred_tab_tren:
+                    st.subheader("Visualisasi Runtun Waktu Harga")
+                    fig_main = go.Figure()
+
+                    if show_hist_toggle:
+                        fig_main.add_trace(go.Scatter(
+                            x=dfp_known["TANGGAL"], y=dfp_known["HARGA"],
+                            mode="lines", name="Data Historis", line=dict(color="#2b5c8f", width=2)
+                        ))
+
+                    if show_pred_toggle:
+                        fig_main.add_trace(go.Scatter(
+                            x=dfp_forecast["TANGGAL"], y=dfp_forecast["PREDIKSI"],
+                            mode="lines+markers", name="Hasil Prediksi", line=dict(color="#e67e22", width=2.5, dash="dash")
+                        ))
+
+                    fig_main.update_layout(
+                        hovermode="x unified",
+                        xaxis_title="Tanggal", yaxis_title="Harga (IDR)",
+                        margin=dict(l=40, r=40, t=20, b=40),
+                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                    )
+                    st.plotly_chart(fig_main, use_container_width=True)
+
+                # SUB-TAB 2: PERBANDINGAN TIAP TAHUN (YoY)
+                with pred_tab_yoy:
+                    st.subheader("Analisis Musiman Berdasarkan Periode Tahunan (Overlay Tahun ke Tahun)")
+
+                    dfp_yoy = dfp_known.copy()
+                    dfp_yoy["TANGGAL_SINTETIS"] = pd.to_datetime(2000 * 1000 + dfp_yoy["HARI_KE"], format="%Y%j")
+                    dfp_yoy["TANGGAL_LENGKAP"] = dfp_yoy["TANGGAL"].dt.strftime("%d %B %Y")
+                    # Return harian (%): perubahan harga dari hari sebelumnya, dihitung berurutan
+                    # secara kronologis (dfp_known sudah terurut berdasarkan TANGGAL)
+                    dfp_yoy["RETURN"] = dfp_yoy["HARGA"].pct_change() * 100
+
+                    fig_yoy = px.line(
+                        dfp_yoy, x="TANGGAL_SINTETIS", y="HARGA", color="TAHUN",
+                        labels={
+                            "TANGGAL_SINTETIS": "Periode (Bulan-Tanggal)",
+                            "HARGA": "Harga (IDR)",
+                            "TAHUN": "Tahun",
+                            "TANGGAL_LENGKAP": "Tanggal Lengkap",
+                            "RETURN": "Return Harian (%)"
+                        },
+                        hover_data={"TANGGAL_LENGKAP": True, "TANGGAL_SINTETIS": False, "RETURN": ":.2f"},
+                        color_discrete_sequence=px.colors.qualitative.Safe
+                    )
+                    fig_yoy.update_xaxes(tickformat="%d %b", dtick="M1")
+                    fig_yoy.update_layout(hovermode="closest", margin=dict(l=40, r=40, t=20, b=40))
+                    st.plotly_chart(fig_yoy, use_container_width=True)
+
+                    st.markdown("##### 📉 Return Harian (%) Antar Tahun")
+                    st.caption("Persentase perubahan harga dari hari sebelumnya — makin lebar lonjakannya, makin tinggi volatilitas di periode itu.")
+                    fig_return = px.line(
+                        dfp_yoy, x="TANGGAL_SINTETIS", y="RETURN", color="TAHUN",
+                        labels={
+                            "TANGGAL_SINTETIS": "Periode (Bulan-Tanggal)",
+                            "RETURN": "Return Harian (%)",
+                            "TAHUN": "Tahun",
+                            "TANGGAL_LENGKAP": "Tanggal Lengkap"
+                        },
+                        hover_data={"TANGGAL_LENGKAP": True, "TANGGAL_SINTETIS": False},
+                        color_discrete_sequence=px.colors.qualitative.Safe
+                    )
+                    fig_return.add_hline(y=0, line_dash="dot", line_color="gray")
+                    fig_return.update_xaxes(tickformat="%d %b", dtick="M1")
+                    fig_return.update_layout(hovermode="closest", margin=dict(l=40, r=40, t=20, b=40))
+                    st.plotly_chart(fig_return, use_container_width=True)
+
+                    st.markdown("##### 📊 Ringkasan Volatilitas Return per Tahun")
+                    dfp_ret_summary = (
+                        dfp_yoy.groupby("TAHUN")["RETURN"]
+                        .agg(**{"Rata-rata Return (%)": "mean", "Volatilitas / Std Return (%)": "std"})
+                        .round(2)
+                        .reset_index()
+                        .rename(columns={"TAHUN": "Tahun"})
+                    )
+                    st.dataframe(dfp_ret_summary, use_container_width=True, hide_index=True)
+
+                # SUB-TAB 3: TABEL DATA HASIL MURNI
+                with pred_tab_data:
+                    st.subheader(f"Data Hasil Prediksi {forecast_horizon} Hari Kedepan")
+                    dfp_display = dfp_forecast.copy()
+                    dfp_display["TANGGAL"] = pd.to_datetime(dfp_display["TANGGAL"]).dt.strftime("%Y-%m-%d")
+                    dfp_display["PREDIKSI"] = dfp_display["PREDIKSI"].apply(lambda x: f"{x:.2f}")
+                    st.dataframe(dfp_display, use_container_width=True)
+
+                    csv_pred = dfp_forecast.copy()
+                    csv_pred["TANGGAL"] = pd.to_datetime(csv_pred["TANGGAL"]).dt.strftime("%Y-%m-%d")
+                    st.download_button(
+                        "⬇️ Unduh Hasil Prediksi (CSV)",
+                        data=csv_pred.to_csv(index=False).encode("utf-8"),
+                        file_name="hasil_prediksi_harga.csv",
+                        mime="text/csv",
+                        key="pred_download"
+                    )
+
+            except Exception as e:
+                st.error(f"Terjadi kesalahan saat memproses data prediksi: {str(e)}")
