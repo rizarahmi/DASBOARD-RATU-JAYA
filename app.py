@@ -840,8 +840,21 @@ omzet_ekspedisi = df_ekspedisi["PENDAPATAN"].sum()  if not df_ekspedisi.empty an
 biaya_ekspedisi = df_ekspedisi["PENGELUARAN"].sum() if not df_ekspedisi.empty and "PENGELUARAN" in df_ekspedisi.columns else 0
 laba_ekspedisi  = omzet_ekspedisi - biaya_ekspedisi
 
-total_omzet = omzet_lapak + omzet_lapak_luar + omzet_ekspedisi
-total_laba  = laba_lapak + laba_lapak_luar + laba_ekspedisi
+# Omzet & Laba dari TANAMAN PANEN — mengikuti filter tanggal sidebar
+# (df_tanaman_sudah_filtered sudah difilter berdasarkan kolom Tanggal Panen)
+def _find_col_tanaman(df, keywords):
+    if df is None or df.empty:
+        return None
+    return next((c for c in df.columns if any(k in c.strip().lower() for k in keywords)), None)
+
+_omzet_col_tp = _find_col_tanaman(df_tanaman_sudah_filtered, ["omzet", "total harga", "pendapatan"])
+_laba_col_tp  = _find_col_tanaman(df_tanaman_sudah_filtered, ["laba", "keuntungan", "profit"])
+
+omzet_tanaman = to_number(df_tanaman_sudah_filtered[_omzet_col_tp]).sum() if _omzet_col_tp else 0
+laba_tanaman  = to_number(df_tanaman_sudah_filtered[_laba_col_tp]).sum()  if _laba_col_tp  else 0
+
+total_omzet = omzet_lapak + omzet_lapak_luar + omzet_ekspedisi + omzet_tanaman
+total_laba  = laba_lapak + laba_lapak_luar + laba_ekspedisi + laba_tanaman
 
 # ============================================================
 # HEADER UTAMA
@@ -902,16 +915,26 @@ with tab1:
         e2.metric("Pengeluaran",     rp(biaya_ekspedisi))
         e3.metric("Laba Ekspedisi",  rp(laba_ekspedisi))
 
+    with st.container(border=True):
+        st.markdown('<div class="income-card-title">🌱 Pendapatan Tanaman Panen</div>', unsafe_allow_html=True)
+        tp1, tp2 = st.columns(2)
+        tp1.metric("Omzet Tanaman Panen", rp(omzet_tanaman))
+        tp2.metric("Laba Tanaman Panen",  rp(laba_tanaman))
+        if not _omzet_col_tp and not _laba_col_tp:
+            st.caption("⚠️ Kolom Omzet/Laba tidak ditemukan di sheet 'TANAMAN PANEN'.")
+        else:
+            st.caption("Mengikuti filter rentang tanggal sidebar (berdasarkan kolom Tanggal Panen).")
+
     st.divider()
     section_heading("📊 Komposisi Omzet & Laba Keseluruhan")
     pie_col1, pie_col2 = st.columns(2)
 
     with pie_col1:
         fig_pie_omzet = px.pie(
-            names=["Lapak", "Lapak Luar", "Ekspedisi"],
-            values=[omzet_lapak, omzet_lapak_luar, omzet_ekspedisi],
+            names=["Lapak", "Lapak Luar", "Ekspedisi", "Tanaman Panen"],
+            values=[omzet_lapak, omzet_lapak_luar, omzet_ekspedisi, omzet_tanaman],
             title="Komposisi Omzet",
-            color_discrete_sequence=["#1f77b4", "#17becf", "#2ca02c"],
+            color_discrete_sequence=["#1f77b4", "#17becf", "#2ca02c", "#ff7f0e"],
             hole=0.4
         )
         fig_pie_omzet.update_traces(
@@ -923,10 +946,10 @@ with tab1:
 
     with pie_col2:
         fig_pie_laba = px.pie(
-            names=["Laba Lapak", "Laba Lapak Luar", "Laba Ekspedisi"],
-            values=[laba_lapak, laba_lapak_luar, laba_ekspedisi],
+            names=["Laba Lapak", "Laba Lapak Luar", "Laba Ekspedisi", "Laba Tanaman Panen"],
+            values=[laba_lapak, laba_lapak_luar, laba_ekspedisi, laba_tanaman],
             title="Komposisi Laba",
-            color_discrete_sequence=["#d62728", "#e377c2", "#9467bd"],
+            color_discrete_sequence=["#d62728", "#e377c2", "#9467bd", "#8c564b"],
             hole=0.4
         )
         fig_pie_laba.update_traces(
@@ -2118,11 +2141,6 @@ def load_data_harga_prediksi() -> pd.DataFrame:
 
 with tab9:
     st.markdown("### 🔮 Analisis & Prediksi Tren Harga")
-    st.caption(
-        "Data harga diambil otomatis dari Google Spreadsheet **\"harga harian\"** "
-        "(kolom TANGGAL, HARGA, MBG). Fitur ini berdiri sendiri dan TIDAK terpengaruh "
-        "filter tanggal di sidebar. Gunakan tombol 🔄 Refresh Data di sidebar untuk memuat ulang data terbaru."
-    )
 
     if not HAS_LGBM and not HAS_PROPHET:
         st.error(
@@ -2139,11 +2157,6 @@ with tab9:
         with st.container(border=True):
             st.markdown('<div class="income-card-title">🎛️ Pengaturan Prediksi</div>', unsafe_allow_html=True)
 
-            st.markdown(
-                "📄 **Sumber data:** Google Spreadsheet *harga harian* — "
-                "edit data langsung di spreadsheet, lalu klik 🔄 Refresh Data di sidebar."
-            )
-
             model_opts = []
             if HAS_LGBM:    model_opts.append("LightGBM (Tree-Based)")
             if HAS_PROPHET: model_opts.append("Prophet (Seasonal Trend)")
@@ -2159,11 +2172,6 @@ with tab9:
             )
             show_hist_toggle = pc4.checkbox("Tampilkan Data Historis", value=True, key="pred_show_hist")
             show_pred_toggle = pc5.checkbox("Tampilkan Hasil Prediksi", value=True, key="pred_show_pred")
-
-            st.caption(
-                "ℹ️ Parameter model (jumlah pohon, learning rate, fleksibilitas tren) sudah ditentukan otomatis "
-                "berdasarkan karakteristik data harga yang fluktuatif, jadi tidak perlu diatur manual."
-            )
 
         future_mbg_value = 1
 
