@@ -570,14 +570,53 @@ def load_ekspedisi() -> pd.DataFrame:
 
 @st.cache_data(ttl=300, show_spinner="Memuat Piutang Lapak...")
 def load_piutang_lapak() -> pd.DataFrame:
-    df = fetch_clean_csv(SHEET_PIUTANG)
+    # Pakai fetch_raw_csv agar posisi kolom terjaga:
+    # kolom B = NAMA pelanggan (dideteksi berdasarkan nama header dulu, fallback posisi B/index 1)
+    df = fetch_raw_csv(SHEET_PIUTANG)
     if df.empty:
         return df
-    if "KODE" in df.columns:
+
+    all_cols = list(df.columns)
+
+    # KODE: cari berdasarkan nama header
+    kode_col = next((c for c in all_cols if c.strip().upper() == "KODE"), None)
+    if kode_col:
+        if kode_col != "KODE":
+            df = df.rename(columns={kode_col: "KODE"})
         df = df[df["KODE"].apply(is_filled)].reset_index(drop=True)
+        all_cols = list(df.columns)
+
+    # NAMA pelanggan: cari berdasarkan nama header dulu, fallback ke KOLOM B (index 1)
+    nama_col = next((c for c in all_cols if c.strip().upper() in ["NAMA", "NAMA PELANGGAN", "CUSTOMER", "PELANGGAN"]), None)
+    if nama_col is None and len(all_cols) > 1:
+        nama_col = all_cols[1]  # kolom B
+    if nama_col and nama_col != "NAMA":
+        df = df.rename(columns={nama_col: "NAMA"})
+        all_cols = list(df.columns)
+
+    # Kolom uang: cari berdasarkan nama header (case-insensitive)
+    hutang_col = next((c for c in all_cols if c.strip().upper() in ["HUTANG", "TOTAL HUTANG", "PIUTANG", "TOTAL PIUTANG"]), None)
+    payment_col = next((c for c in all_cols if c.strip().upper() in ["PAYMENT", "BAYAR", "TERBAYAR", "PEMBAYARAN"]), None)
+    sisa_col = next((c for c in all_cols if c.strip().upper() in ["SISA HUTANG", "SISA PIUTANG", "SISA", "OUTSTANDING"]), None)
+
+    rename_map = {}
+    if hutang_col and hutang_col != "Hutang":
+        rename_map[hutang_col] = "Hutang"
+    if payment_col and payment_col != "Payment":
+        rename_map[payment_col] = "Payment"
+    if sisa_col and sisa_col != "Sisa Hutang":
+        rename_map[sisa_col] = "Sisa Hutang"
+    if rename_map:
+        df = df.rename(columns=rename_map)
+
     for col in ["Hutang", "Payment", "Sisa Hutang"]:
         if col in df.columns:
             df[col] = to_number(df[col])
+
+    # Kalau Sisa Hutang tidak ada tapi Hutang & Payment ada, hitung sendiri
+    if "Sisa Hutang" not in df.columns and "Hutang" in df.columns and "Payment" in df.columns:
+        df["Sisa Hutang"] = df["Hutang"].fillna(0) - df["Payment"].fillna(0)
+
     tgl_col = next((c for c in df.columns if c.strip().upper() in ["TANGGAL", "TGL", "DATE"]), None)
     df["Tanggal_Lengkap"] = pd.to_datetime(df[tgl_col], dayfirst=True, errors="coerce") if tgl_col else pd.NaT
     return df
