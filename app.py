@@ -795,6 +795,7 @@ valid_dates = pd.concat([
     df_penjualan_luar_raw["Tanggal_Lengkap"] if not df_penjualan_luar_raw.empty and "Tanggal_Lengkap" in df_penjualan_luar_raw.columns else pd.Series(dtype="datetime64[ns]"),
     df_pengeluaran_raw["Tanggal_Lengkap"]    if not df_pengeluaran_raw.empty    and "Tanggal_Lengkap" in df_pengeluaran_raw.columns    else pd.Series(dtype="datetime64[ns]"),
     df_kas_raw["Tanggal_Kas"]                if not df_kas_raw.empty            and "Tanggal_Kas"     in df_kas_raw.columns            else pd.Series(dtype="datetime64[ns]"),
+    df_ekspedisi_raw["Tanggal_Lengkap"]      if not df_ekspedisi_raw.empty      and "Tanggal_Lengkap" in df_ekspedisi_raw.columns      else pd.Series(dtype="datetime64[ns]"),
 ]).dropna()
 
 date_range = None
@@ -832,7 +833,13 @@ if date_range and isinstance(date_range, tuple) and len(date_range) == 2:
     if not df_pengeluaran.empty and "Tanggal_Lengkap" in df_pengeluaran.columns:
         df_pengeluaran = df_pengeluaran[(df_pengeluaran["Tanggal_Lengkap"] >= start_ts) & (df_pengeluaran["Tanggal_Lengkap"] <= end_ts)]
     if not df_ekspedisi.empty and "Tanggal_Lengkap" in df_ekspedisi.columns:
-        df_ekspedisi = df_ekspedisi[(df_ekspedisi["Tanggal_Lengkap"] >= start_ts) & (df_ekspedisi["Tanggal_Lengkap"] <= end_ts)]
+        # Baris dengan tanggal valid difilter sesuai rentang; baris yang tanggalnya
+        # gagal terbaca (NaT) tetap disertakan agar data ekspedisi tidak hilang.
+        _mask_eks = (
+            ((df_ekspedisi["Tanggal_Lengkap"] >= start_ts) & (df_ekspedisi["Tanggal_Lengkap"] <= end_ts))
+            | df_ekspedisi["Tanggal_Lengkap"].isna()
+        )
+        df_ekspedisi = df_ekspedisi[_mask_eks]
     if not df_piutang_filtered.empty and "Tanggal_Lengkap" in df_piutang_filtered.columns:
         df_piutang_filtered = df_piutang_filtered[(df_piutang_filtered["Tanggal_Lengkap"] >= start_ts) & (df_piutang_filtered["Tanggal_Lengkap"] <= end_ts)]
     if not df_piutang_luar_filtered.empty and "Tanggal_Lengkap" in df_piutang_luar_filtered.columns:
