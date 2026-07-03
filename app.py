@@ -1676,6 +1676,90 @@ with tab4:
     with piutang_tab1:
         _render_piutang_tab(df_piutang_raw, df_piutang_filtered, "Pelanggan Lapak")
 
+        # [CHANGE] Daftar nama pelanggan piutang lapak — bisa difilter per lapak (KODE)
+        if not df_piutang_raw.empty:
+            nama_col_pl = next(
+                (c for c in df_piutang_raw.columns if c.strip().upper() in ["NAMA", "NAMA PELANGGAN", "CUSTOMER", "PELANGGAN"]),
+                None
+            )
+            kode_col_pl = "KODE" if "KODE" in df_piutang_raw.columns else None
+
+            if nama_col_pl and "Sisa Hutang" in df_piutang_raw.columns:
+                st.divider()
+                st.markdown("#### 👤 Daftar Piutang per Nama Pelanggan")
+
+                # Filter per lapak (KODE)
+                if kode_col_pl:
+                    lapak_opts_pl = sorted(df_piutang_raw[kode_col_pl].dropna().astype(str).unique())
+                    sel_lapak_pl = st.multiselect(
+                        "Filter Lapak (KODE)", lapak_opts_pl, default=lapak_opts_pl, key="tab4_piutang_lapak_filter"
+                    )
+                    df_piutang_nama = (
+                        df_piutang_raw[df_piutang_raw[kode_col_pl].astype(str).isin(sel_lapak_pl)]
+                        if sel_lapak_pl else df_piutang_raw.iloc[0:0]
+                    )
+                else:
+                    df_piutang_nama = df_piutang_raw
+
+                if df_piutang_nama.empty:
+                    st.info("Pilih minimal satu lapak untuk menampilkan daftar pelanggan.")
+                else:
+                    group_cols_pl = [nama_col_pl] + ([kode_col_pl] if kode_col_pl else [])
+                    agg_nama_pl = {"Sisa_Hutang": ("Sisa Hutang", "sum")}
+                    if "Hutang" in df_piutang_nama.columns:
+                        agg_nama_pl["Total_Hutang"] = ("Hutang", "sum")
+                    if "Payment" in df_piutang_nama.columns:
+                        agg_nama_pl["Total_Terbayar"] = ("Payment", "sum")
+
+                    per_nama_pl = (
+                        df_piutang_nama.groupby(group_cols_pl)
+                        .agg(**agg_nama_pl)
+                        .reset_index()
+                        .sort_values("Sisa_Hutang", ascending=False)
+                    )
+
+                    # Grafik sisa piutang per nama (batasi 25 teratas agar tetap terbaca)
+                    top_nama_pl = per_nama_pl.head(25)
+                    fig_nama_pl = go.Figure()
+                    fig_nama_pl.add_trace(go.Bar(
+                        x=top_nama_pl[nama_col_pl], y=top_nama_pl["Sisa_Hutang"],
+                        text=[rp_short(v) for v in top_nama_pl["Sisa_Hutang"]],
+                        textposition="outside", textfont=dict(size=12, color="#d62728"),
+                        marker_color="#d62728"
+                    ))
+                    fig_nama_pl.update_layout(
+                        title="Sisa Piutang per Nama Pelanggan (Top 25)",
+                        xaxis_title="Nama Pelanggan", yaxis_title="Rupiah",
+                        xaxis_tickangle=-30, showlegend=False, height=450
+                    )
+                    pad_yaxis(fig_nama_pl, top_nama_pl["Sisa_Hutang"].max() if not top_nama_pl.empty else 0)
+                    st.plotly_chart(fig_nama_pl, use_container_width=True)
+
+                    # Tabel lengkap semua nama sesuai filter lapak
+                    tabel_nama_pl = per_nama_pl.copy()
+                    rename_pl = {nama_col_pl: "Nama Pelanggan", "Sisa_Hutang": "Sisa Piutang"}
+                    if kode_col_pl:
+                        rename_pl[kode_col_pl] = "Kode Lapak"
+                    tabel_nama_pl["Sisa_Hutang"] = per_nama_pl["Sisa_Hutang"].apply(rp)
+                    if "Total_Hutang" in tabel_nama_pl.columns:
+                        tabel_nama_pl["Total_Hutang"] = per_nama_pl["Total_Hutang"].apply(rp)
+                        rename_pl["Total_Hutang"] = "Total Piutang"
+                    if "Total_Terbayar" in tabel_nama_pl.columns:
+                        tabel_nama_pl["Total_Terbayar"] = per_nama_pl["Total_Terbayar"].apply(rp)
+                        rename_pl["Total_Terbayar"] = "Total Terbayar"
+                    tabel_nama_pl = tabel_nama_pl.rename(columns=rename_pl)
+
+                    ordered_pl = ["Nama Pelanggan"]
+                    if "Kode Lapak" in tabel_nama_pl.columns:      ordered_pl.append("Kode Lapak")
+                    if "Total Piutang" in tabel_nama_pl.columns:   ordered_pl.append("Total Piutang")
+                    if "Total Terbayar" in tabel_nama_pl.columns:  ordered_pl.append("Total Terbayar")
+                    ordered_pl.append("Sisa Piutang")
+
+                    st.markdown(f"**Total: {len(tabel_nama_pl)} pelanggan**")
+                    st.dataframe(tabel_nama_pl[ordered_pl], use_container_width=True, hide_index=True)
+            elif not nama_col_pl:
+                st.info("Kolom 'NAMA' / 'NAMA PELANGGAN' tidak ditemukan di sheet PIUTANG LAPAK, sehingga daftar per nama pelanggan tidak bisa ditampilkan.")
+
     with piutang_tab2:
         _render_piutang_tab(df_piutang_luar_raw, df_piutang_luar_filtered, "Lapak Luar")
 
@@ -1881,21 +1965,6 @@ with tab6:
             )
             pad_yaxis(fig_kas, max(kas_bulanan["Masuk"].max(), kas_bulanan["Keluar"].max()) if not kas_bulanan.empty else 0)
             st.plotly_chart(fig_kas, use_container_width=True)
-
-            if "SALDO" in df_kas_plot.columns:
-                saldo_trend = df_kas_plot.dropna(subset=["Tanggal_Kas", "SALDO"]).sort_values("Tanggal_Kas")
-                fig_saldo = go.Figure()
-                fig_saldo.add_trace(go.Scatter(
-                    x=saldo_trend["Tanggal_Kas"], y=saldo_trend["SALDO"],
-                    mode="lines", name="Saldo",
-                    line=dict(color="#1f77b4", width=2),
-                    fill="tozeroy", fillcolor="rgba(31,119,180,0.15)"
-                ))
-                fig_saldo.update_layout(
-                    title="Tren Saldo Harian",
-                    yaxis_title="Rupiah", xaxis_title="Tanggal", yaxis_tickformat=","
-                )
-                st.plotly_chart(fig_saldo, use_container_width=True)
 
         st.divider()
         st.markdown("#### 🔍 Rincian Transaksi per Jenis")
