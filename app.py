@@ -801,7 +801,27 @@ valid_dates = pd.concat([
 date_range = None
 if not valid_dates.empty:
     min_d, max_d = valid_dates.min().date(), valid_dates.max().date()
-    date_range = st.sidebar.date_input("Rentang Tanggal", value=(min_d, max_d), min_value=min_d, max_value=max_d)
+
+    # [CHANGE] Default rentang tanggal = BULAN INI (otomatis saat dashboard dibuka),
+    # tetap bisa diubah manual lewat sidebar. Dibatasi (clamp) ke rentang data yang ada.
+    today = datetime.now().date()
+    awal_bulan  = today.replace(day=1)
+    akhir_bulan = (pd.Timestamp(today) + pd.offsets.MonthEnd(0)).date()
+
+    default_start = max(min_d, awal_bulan)
+    default_end   = min(max_d, akhir_bulan)
+
+    # Kalau tidak ada data di bulan ini (mis. semua data sebelum bulan berjalan),
+    # fallback ke seluruh rentang data agar dashboard tidak tampil kosong.
+    if default_start > default_end:
+        default_start, default_end = min_d, max_d
+
+    date_range = st.sidebar.date_input(
+        "Rentang Tanggal",
+        value=(default_start, default_end),
+        min_value=min_d, max_value=max_d
+    )
+    st.sidebar.caption("Default: bulan berjalan. Ubah rentang di atas untuk melihat periode lain.")
 
 st.sidebar.markdown("---")
 if st.sidebar.button("🚪 Logout"):
