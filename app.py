@@ -1110,169 +1110,7 @@ with tab2:
 
         st.divider()
 
-        # ── 2. TONNASE BERDASARKAN GRADE ──────────────────────────────────────
-        section_heading("📊 Tonnase Terjual Berdasarkan Grade")
-        if has_grade and has_kg:
-            df_grade_work = df_penjualan.copy()
-            df_grade_work[KG_COL] = to_number(df_grade_work[KG_COL])
-            df_grade_valid = df_grade_work[
-                df_grade_work[KG_COL].notna() & df_grade_work[GRADE_COL].apply(is_filled)
-            ]
-
-            agg_grade = {"Total_KG": (KG_COL, "sum")}
-            if "Total harga" in df_grade_valid.columns:
-                agg_grade["Omzet"] = ("Total harga", "sum")
-            if "Keuntungan" in df_grade_valid.columns:
-                agg_grade["Laba"] = ("Keuntungan", "sum")
-            grade_grp = df_grade_valid.groupby(GRADE_COL).agg(**agg_grade).reset_index().sort_values("Total_KG", ascending=False)
-
-            g1, g2 = st.columns(2)
-            with g1:
-                fig_grade_bar = go.Figure()
-                fig_grade_bar.add_trace(go.Bar(
-                    x=grade_grp[GRADE_COL],
-                    y=grade_grp["Total_KG"],
-                    text=[f"{v:,.1f} KG" for v in grade_grp["Total_KG"]],
-                    textposition="outside",
-                    textfont=dict(size=12),
-                    marker_color="#1f77b4"
-                ))
-                fig_grade_bar.update_layout(
-                    title="Total KG per Grade",
-                    xaxis_title="Grade", yaxis_title="Kilogram (KG)", showlegend=False
-                )
-                pad_yaxis(fig_grade_bar, grade_grp["Total_KG"].max() if not grade_grp.empty else 0)
-                st.plotly_chart(fig_grade_bar, use_container_width=True)
-
-            with g2:
-                fig_grade_pie = px.pie(
-                    grade_grp, names=GRADE_COL, values="Total_KG",
-                    title="Proporsi KG per Grade", hole=0.4
-                )
-                fig_grade_pie.update_traces(textinfo="label+percent", textfont_size=13)
-                st.plotly_chart(fig_grade_pie, use_container_width=True)
-
-            grade_display = grade_grp.copy()
-            grade_display["Total_KG"] = grade_display["Total_KG"].apply(lambda x: f"{x:,.1f} KG")
-            disp_cols = [GRADE_COL, "Total_KG"]
-            if "Omzet" in grade_display.columns:
-                grade_display["Omzet"] = grade_grp["Omzet"].apply(rp)
-                disp_cols.append("Omzet")
-            if "Laba" in grade_display.columns:
-                grade_display["Laba"] = grade_grp["Laba"].apply(rp)
-                disp_cols.append("Laba")
-            st.dataframe(grade_display[disp_cols], use_container_width=True, hide_index=True)
-        else:
-            st.info("Kolom GRADE atau Jumlah (KG) tidak ditemukan di data penjualan lapak.")
-
-        st.divider()
-
-        # ── 3. TONNASE BERDASARKAN JENIS ──────────────────────────────────────
-        section_heading("📊 Tonnase Terjual Berdasarkan Jenis")
-        if has_jenis and has_kg:
-            df_jenis_work = df_penjualan.copy()
-            df_jenis_work[KG_COL] = to_number(df_jenis_work[KG_COL])
-            df_jenis_valid = df_jenis_work[
-                df_jenis_work[KG_COL].notna() & df_jenis_work[JENIS_COL].apply(is_filled)
-            ]
-
-            agg_jenis = {"Total_KG": (KG_COL, "sum")}
-            if "Total harga" in df_jenis_valid.columns:
-                agg_jenis["Omzet"] = ("Total harga", "sum")
-            if "Keuntungan" in df_jenis_valid.columns:
-                agg_jenis["Laba"] = ("Keuntungan", "sum")
-            jenis_grp = df_jenis_valid.groupby(JENIS_COL).agg(**agg_jenis).reset_index().sort_values("Total_KG", ascending=False)
-
-            j1, j2 = st.columns(2)
-            with j1:
-                fig_jenis_bar = go.Figure()
-                fig_jenis_bar.add_trace(go.Bar(
-                    x=jenis_grp[JENIS_COL],
-                    y=jenis_grp["Total_KG"],
-                    text=[f"{v:,.1f} KG" for v in jenis_grp["Total_KG"]],
-                    textposition="outside",
-                    textfont=dict(size=12),
-                    marker_color="#2ca02c"
-                ))
-                fig_jenis_bar.update_layout(
-                    title="Total KG per Jenis",
-                    xaxis_title="Jenis", yaxis_title="Kilogram (KG)", showlegend=False
-                )
-                pad_yaxis(fig_jenis_bar, jenis_grp["Total_KG"].max() if not jenis_grp.empty else 0)
-                st.plotly_chart(fig_jenis_bar, use_container_width=True)
-
-            with j2:
-                fig_jenis_pie = px.pie(
-                    jenis_grp, names=JENIS_COL, values="Total_KG",
-                    title="Proporsi KG per Jenis", hole=0.4,
-                    color_discrete_sequence=px.colors.qualitative.Set2
-                )
-                fig_jenis_pie.update_traces(textinfo="label+percent", textfont_size=13)
-                st.plotly_chart(fig_jenis_pie, use_container_width=True)
-
-            jenis_display = jenis_grp.copy()
-            jenis_display["Total_KG"] = jenis_display["Total_KG"].apply(lambda x: f"{x:,.1f} KG")
-            disp_cols2 = [JENIS_COL, "Total_KG"]
-            if "Omzet" in jenis_display.columns:
-                jenis_display["Omzet"] = jenis_grp["Omzet"].apply(rp)
-                disp_cols2.append("Omzet")
-            if "Laba" in jenis_display.columns:
-                jenis_display["Laba"] = jenis_grp["Laba"].apply(rp)
-                disp_cols2.append("Laba")
-            st.dataframe(jenis_display[disp_cols2], use_container_width=True, hide_index=True)
-        else:
-            st.info("Kolom JENIS atau Jumlah (KG) tidak ditemukan di data penjualan lapak.")
-
-        st.divider()
-
-        # ── 4. ANALISA GABUNGAN GRADE × JENIS ────────────────────────────────
-        section_heading("🔀 Analisa Gabungan Grade × Jenis")
-        if has_grade and has_jenis and has_kg:
-            df_gab = df_penjualan.copy()
-            df_gab[KG_COL] = to_number(df_gab[KG_COL])
-            df_gabungan = df_gab[
-                df_gab[KG_COL].notna() &
-                df_gab[GRADE_COL].apply(is_filled) &
-                df_gab[JENIS_COL].apply(is_filled)
-            ].copy()
-
-            if not df_gabungan.empty:
-                gabungan_grp = (
-                    df_gabungan.groupby([JENIS_COL, GRADE_COL])[KG_COL]
-                    .sum().reset_index()
-                )
-                gabungan_grp.columns = ["Jenis", "Grade", "Total_KG"]
-
-                fig_gabungan = px.bar(
-                    gabungan_grp, x="Jenis", y="Total_KG", color="Grade",
-                    barmode="group",
-                    title="Total KG per Jenis × Grade",
-                    text=gabungan_grp["Total_KG"].apply(lambda v: f"{v:,.1f}"),
-                    labels={"Total_KG": "Kilogram (KG)", "Jenis": "Jenis", "Grade": "Grade"}
-                )
-                fig_gabungan.update_traces(textposition="outside", textfont_size=10)
-                pad_yaxis(fig_gabungan, gabungan_grp["Total_KG"].max() if not gabungan_grp.empty else 0)
-                fig_gabungan.update_layout(
-                    xaxis_tickangle=-30,
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02),
-                    height=500
-                )
-                st.plotly_chart(fig_gabungan, use_container_width=True)
-
-                pivot_gab = gabungan_grp.pivot(index="Jenis", columns="Grade", values="Total_KG").fillna(0)
-                pivot_display = pivot_gab.copy()
-                for c in pivot_display.columns:
-                    pivot_display[c] = pivot_gab[c].apply(lambda x: f"{x:,.1f} KG")
-                st.markdown("**Tabel Pivot KG: Jenis (baris) × Grade (kolom)**")
-                st.dataframe(pivot_display, use_container_width=True)
-            else:
-                st.info("Tidak ada data dengan Grade dan Jenis yang terisi.")
-        else:
-            st.info("Kolom GRADE dan/atau JENIS tidak tersedia untuk analisa gabungan.")
-
-        st.divider()
-
-        # ── 5. OMZET & PROFIT PER LAPAK (+ % Margin) ─────────────────────────
+        # ── 2. OMZET & PROFIT PER LAPAK (+ % Margin) ─────────────────────────
         section_heading("📊 Omzet & Profit per Lapak")
         if "KODE LAPAK" in df_penjualan.columns:
             per_lapak = df_penjualan.groupby("KODE LAPAK").agg(
@@ -1338,7 +1176,7 @@ with tab2:
 
         st.divider()
 
-        # ── 6. TONNASE TERJUAL vs DIBUANG PER LAPAK (+ % Dibuang) ────────────
+        # ── 3. TONNASE TERJUAL vs DIBUANG PER LAPAK (+ % Dibuang) ────────────
         section_heading("⚖️ Tonnase Terjual vs Dibuang per Lapak")
         if has_kg and "KODE LAPAK" in df_penjualan.columns and "Is_Dibuang" in df_penjualan.columns:
             df_ton_work = df_penjualan.copy()
@@ -1409,7 +1247,7 @@ with tab2:
 
         st.divider()
 
-        # ── 7. TUNAI vs KREDIT PER LAPAK ──────────────────────────────────────
+        # ── 4. TUNAI vs KREDIT PER LAPAK ──────────────────────────────────────
         section_heading("💳 Pembayaran Tunai vs Kredit per Lapak")
         if all(c in df_penjualan.columns for c in ["KODE LAPAK", "Tunai", "Kredit"]):
             pay_grp = df_penjualan.groupby("KODE LAPAK").agg(
@@ -1440,7 +1278,7 @@ with tab2:
 
         st.divider()
 
-        # ── 8. PENGELUARAN BULANAN PER LAPAK ──────────────────────────────────
+        # ── 5. PENGELUARAN BULANAN PER LAPAK ──────────────────────────────────
         section_heading("💸 Pengeluaran Bulanan per Lapak")
 
         with st.expander("🔍 Debug: Kolom PENGELUARAN LAPAK", expanded=False):
@@ -1493,45 +1331,165 @@ with tab2:
 
         st.divider()
 
-        # ── 9. BOXPLOT DISTRIBUSI TONNASE ─────────────────────────────────────
-        section_heading("📦 Distribusi Tonnase Bulanan per Lapak (Boxplot)")
-        st.caption("Menampilkan SEMUA bulan yang ada di data (tidak dibatasi filter tanggal sidebar).")
+        # ── 6. TONNASE BERDASARKAN GRADE ──────────────────────────────────────
+        section_heading("📊 Tonnase Terjual Berdasarkan Grade")
+        if has_grade and has_kg:
+            df_grade_work = df_penjualan.copy()
+            df_grade_work[KG_COL] = to_number(df_grade_work[KG_COL])
+            df_grade_valid = df_grade_work[
+                df_grade_work[KG_COL].notna() & df_grade_work[GRADE_COL].apply(is_filled)
+            ]
 
-        if has_kg and "KODE LAPAK" in df_penjualan_raw.columns and "Tanggal_Lengkap" in df_penjualan_raw.columns:
-            df_box = df_penjualan_raw.copy()
-            df_box[KG_COL] = to_number(df_box[KG_COL])
-            df_box["Bulan_Label"] = df_box["Tanggal_Lengkap"].dt.to_period("M").astype(str)
-            df_box_valid = df_box[df_box[KG_COL].notna() & df_box["Tanggal_Lengkap"].notna()]
+            agg_grade = {"Total_KG": (KG_COL, "sum")}
+            if "Total harga" in df_grade_valid.columns:
+                agg_grade["Omzet"] = ("Total harga", "sum")
+            if "Keuntungan" in df_grade_valid.columns:
+                agg_grade["Laba"] = ("Keuntungan", "sum")
+            grade_grp = df_grade_valid.groupby(GRADE_COL).agg(**agg_grade).reset_index().sort_values("Total_KG", ascending=False)
 
-            if not df_box_valid.empty:
-                lapak_box_opts = sorted(df_box_valid["KODE LAPAK"].dropna().unique())
-                sel_lapak_box = st.multiselect(
-                    "Tampilkan/Sembunyikan Lapak pada Boxplot",
-                    lapak_box_opts, default=lapak_box_opts, key="tab2_box_lapak"
+            g1, g2 = st.columns(2)
+            with g1:
+                fig_grade_bar = go.Figure()
+                fig_grade_bar.add_trace(go.Bar(
+                    x=grade_grp[GRADE_COL],
+                    y=grade_grp["Total_KG"],
+                    text=[f"{v:,.1f} KG" for v in grade_grp["Total_KG"]],
+                    textposition="outside",
+                    textfont=dict(size=12),
+                    marker_color="#1f77b4"
+                ))
+                fig_grade_bar.update_layout(
+                    title="Total KG per Grade",
+                    xaxis_title="Grade", yaxis_title="Kilogram (KG)", showlegend=False
                 )
-                df_box_show = df_box_valid[df_box_valid["KODE LAPAK"].isin(sel_lapak_box)] if sel_lapak_box else df_box_valid.iloc[0:0]
+                pad_yaxis(fig_grade_bar, grade_grp["Total_KG"].max() if not grade_grp.empty else 0)
+                st.plotly_chart(fig_grade_bar, use_container_width=True)
 
-                if not df_box_show.empty:
-                    bulan_order = sorted(df_box_show["Bulan_Label"].unique())
-                    fig_box = px.box(
-                        df_box_show, x="Bulan_Label", y=KG_COL, color="KODE LAPAK",
-                        category_orders={"Bulan_Label": bulan_order},
-                        title="Distribusi Tonnase per Bulan — Semua Bulan, per Lapak",
-                        labels={"Bulan_Label": "Bulan", KG_COL: "Total Distribusi (KG)", "KODE LAPAK": "Lapak"},
-                        points="outliers"
-                    )
-                    fig_box.update_layout(
-                        xaxis_tickangle=-45,
-                        legend=dict(orientation="h", yanchor="bottom", y=1.02),
-                        boxmode="group", height=500
-                    )
-                    st.plotly_chart(fig_box, use_container_width=True)
-                else:
-                    st.info("Pilih minimal satu lapak untuk ditampilkan.")
-            else:
-                st.info("Data tidak cukup untuk menampilkan boxplot.")
+            with g2:
+                fig_grade_pie = px.pie(
+                    grade_grp, names=GRADE_COL, values="Total_KG",
+                    title="Proporsi KG per Grade", hole=0.4
+                )
+                fig_grade_pie.update_traces(textinfo="label+percent", textfont_size=13)
+                st.plotly_chart(fig_grade_pie, use_container_width=True)
+
+            grade_display = grade_grp.copy()
+            grade_display["Total_KG"] = grade_display["Total_KG"].apply(lambda x: f"{x:,.1f} KG")
+            disp_cols = [GRADE_COL, "Total_KG"]
+            if "Omzet" in grade_display.columns:
+                grade_display["Omzet"] = grade_grp["Omzet"].apply(rp)
+                disp_cols.append("Omzet")
+            if "Laba" in grade_display.columns:
+                grade_display["Laba"] = grade_grp["Laba"].apply(rp)
+                disp_cols.append("Laba")
+            st.dataframe(grade_display[disp_cols], use_container_width=True, hide_index=True)
         else:
-            st.info("Kolom berat (KG/Jumlah) tidak ditemukan untuk boxplot.")
+            st.info("Kolom GRADE atau Jumlah (KG) tidak ditemukan di data penjualan lapak.")
+
+        st.divider()
+
+        # ── 7. TONNASE BERDASARKAN JENIS ──────────────────────────────────────
+        section_heading("📊 Tonnase Terjual Berdasarkan Jenis")
+        if has_jenis and has_kg:
+            df_jenis_work = df_penjualan.copy()
+            df_jenis_work[KG_COL] = to_number(df_jenis_work[KG_COL])
+            df_jenis_valid = df_jenis_work[
+                df_jenis_work[KG_COL].notna() & df_jenis_work[JENIS_COL].apply(is_filled)
+            ]
+
+            agg_jenis = {"Total_KG": (KG_COL, "sum")}
+            if "Total harga" in df_jenis_valid.columns:
+                agg_jenis["Omzet"] = ("Total harga", "sum")
+            if "Keuntungan" in df_jenis_valid.columns:
+                agg_jenis["Laba"] = ("Keuntungan", "sum")
+            jenis_grp = df_jenis_valid.groupby(JENIS_COL).agg(**agg_jenis).reset_index().sort_values("Total_KG", ascending=False)
+
+            j1, j2 = st.columns(2)
+            with j1:
+                fig_jenis_bar = go.Figure()
+                fig_jenis_bar.add_trace(go.Bar(
+                    x=jenis_grp[JENIS_COL],
+                    y=jenis_grp["Total_KG"],
+                    text=[f"{v:,.1f} KG" for v in jenis_grp["Total_KG"]],
+                    textposition="outside",
+                    textfont=dict(size=12),
+                    marker_color="#2ca02c"
+                ))
+                fig_jenis_bar.update_layout(
+                    title="Total KG per Jenis",
+                    xaxis_title="Jenis", yaxis_title="Kilogram (KG)", showlegend=False
+                )
+                pad_yaxis(fig_jenis_bar, jenis_grp["Total_KG"].max() if not jenis_grp.empty else 0)
+                st.plotly_chart(fig_jenis_bar, use_container_width=True)
+
+            with j2:
+                fig_jenis_pie = px.pie(
+                    jenis_grp, names=JENIS_COL, values="Total_KG",
+                    title="Proporsi KG per Jenis", hole=0.4,
+                    color_discrete_sequence=px.colors.qualitative.Set2
+                )
+                fig_jenis_pie.update_traces(textinfo="label+percent", textfont_size=13)
+                st.plotly_chart(fig_jenis_pie, use_container_width=True)
+
+            jenis_display = jenis_grp.copy()
+            jenis_display["Total_KG"] = jenis_display["Total_KG"].apply(lambda x: f"{x:,.1f} KG")
+            disp_cols2 = [JENIS_COL, "Total_KG"]
+            if "Omzet" in jenis_display.columns:
+                jenis_display["Omzet"] = jenis_grp["Omzet"].apply(rp)
+                disp_cols2.append("Omzet")
+            if "Laba" in jenis_display.columns:
+                jenis_display["Laba"] = jenis_grp["Laba"].apply(rp)
+                disp_cols2.append("Laba")
+            st.dataframe(jenis_display[disp_cols2], use_container_width=True, hide_index=True)
+        else:
+            st.info("Kolom JENIS atau Jumlah (KG) tidak ditemukan di data penjualan lapak.")
+
+        st.divider()
+
+        # ── 8. ANALISA GABUNGAN GRADE × JENIS ────────────────────────────────
+        section_heading("🔀 Analisa Gabungan Grade × Jenis")
+        if has_grade and has_jenis and has_kg:
+            df_gab = df_penjualan.copy()
+            df_gab[KG_COL] = to_number(df_gab[KG_COL])
+            df_gabungan = df_gab[
+                df_gab[KG_COL].notna() &
+                df_gab[GRADE_COL].apply(is_filled) &
+                df_gab[JENIS_COL].apply(is_filled)
+            ].copy()
+
+            if not df_gabungan.empty:
+                gabungan_grp = (
+                    df_gabungan.groupby([JENIS_COL, GRADE_COL])[KG_COL]
+                    .sum().reset_index()
+                )
+                gabungan_grp.columns = ["Jenis", "Grade", "Total_KG"]
+
+                fig_gabungan = px.bar(
+                    gabungan_grp, x="Jenis", y="Total_KG", color="Grade",
+                    barmode="group",
+                    title="Total KG per Jenis × Grade",
+                    text=gabungan_grp["Total_KG"].apply(lambda v: f"{v:,.1f}"),
+                    labels={"Total_KG": "Kilogram (KG)", "Jenis": "Jenis", "Grade": "Grade"}
+                )
+                fig_gabungan.update_traces(textposition="outside", textfont_size=10)
+                pad_yaxis(fig_gabungan, gabungan_grp["Total_KG"].max() if not gabungan_grp.empty else 0)
+                fig_gabungan.update_layout(
+                    xaxis_tickangle=-30,
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02),
+                    height=500
+                )
+                st.plotly_chart(fig_gabungan, use_container_width=True)
+
+                pivot_gab = gabungan_grp.pivot(index="Jenis", columns="Grade", values="Total_KG").fillna(0)
+                pivot_display = pivot_gab.copy()
+                for c in pivot_display.columns:
+                    pivot_display[c] = pivot_gab[c].apply(lambda x: f"{x:,.1f} KG")
+                st.markdown("**Tabel Pivot KG: Jenis (baris) × Grade (kolom)**")
+                st.dataframe(pivot_display, use_container_width=True)
+            else:
+                st.info("Tidak ada data dengan Grade dan Jenis yang terisi.")
+        else:
+            st.info("Kolom GRADE dan/atau JENIS tidak tersedia untuk analisa gabungan.")
 
 
 # ===========================================================
@@ -1757,45 +1715,51 @@ with tab4:
                         .sort_values("Sisa_Hutang", ascending=False)
                     )
 
-                    # Grafik sisa piutang per nama (batasi 25 teratas agar tetap terbaca)
-                    top_nama_pl = per_nama_pl.head(25)
-                    fig_nama_pl = go.Figure()
-                    fig_nama_pl.add_trace(go.Bar(
-                        x=top_nama_pl[nama_col_pl], y=top_nama_pl["Sisa_Hutang"],
-                        text=[rp_short(v) for v in top_nama_pl["Sisa_Hutang"]],
-                        textposition="outside", textfont=dict(size=12, color="#d62728"),
-                        marker_color="#d62728"
-                    ))
-                    fig_nama_pl.update_layout(
-                        title="Sisa Piutang per Nama Pelanggan (Top 25)",
-                        xaxis_title="Nama Pelanggan", yaxis_title="Rupiah",
-                        xaxis_tickangle=-30, showlegend=False, height=450
-                    )
-                    pad_yaxis(fig_nama_pl, top_nama_pl["Sisa_Hutang"].max() if not top_nama_pl.empty else 0)
-                    st.plotly_chart(fig_nama_pl, use_container_width=True)
+                    # [CHANGE] Sembunyikan pelanggan yang sudah lunas (sisa piutang 0 atau kurang)
+                    per_nama_pl = per_nama_pl[per_nama_pl["Sisa_Hutang"].fillna(0) > 0].reset_index(drop=True)
 
-                    # Tabel lengkap semua nama sesuai filter lapak
-                    tabel_nama_pl = per_nama_pl.copy()
-                    rename_pl = {nama_col_pl: "Nama Pelanggan", "Sisa_Hutang": "Sisa Piutang"}
-                    if kode_col_pl:
-                        rename_pl[kode_col_pl] = "Kode Lapak"
-                    tabel_nama_pl["Sisa_Hutang"] = per_nama_pl["Sisa_Hutang"].apply(rp)
-                    if "Total_Hutang" in tabel_nama_pl.columns:
-                        tabel_nama_pl["Total_Hutang"] = per_nama_pl["Total_Hutang"].apply(rp)
-                        rename_pl["Total_Hutang"] = "Total Piutang"
-                    if "Total_Terbayar" in tabel_nama_pl.columns:
-                        tabel_nama_pl["Total_Terbayar"] = per_nama_pl["Total_Terbayar"].apply(rp)
-                        rename_pl["Total_Terbayar"] = "Total Terbayar"
-                    tabel_nama_pl = tabel_nama_pl.rename(columns=rename_pl)
+                    if per_nama_pl.empty:
+                        st.success("🎉 Semua pelanggan pada lapak terpilih sudah lunas (sisa piutang 0).")
+                    else:
+                        # Grafik sisa piutang per nama (batasi 25 teratas agar tetap terbaca)
+                        top_nama_pl = per_nama_pl.head(25)
+                        fig_nama_pl = go.Figure()
+                        fig_nama_pl.add_trace(go.Bar(
+                            x=top_nama_pl[nama_col_pl], y=top_nama_pl["Sisa_Hutang"],
+                            text=[rp_short(v) for v in top_nama_pl["Sisa_Hutang"]],
+                            textposition="outside", textfont=dict(size=12, color="#d62728"),
+                            marker_color="#d62728"
+                        ))
+                        fig_nama_pl.update_layout(
+                            title="Sisa Piutang per Nama Pelanggan (Top 25, hanya yang masih ada sisa)",
+                            xaxis_title="Nama Pelanggan", yaxis_title="Rupiah",
+                            xaxis_tickangle=-30, showlegend=False, height=450
+                        )
+                        pad_yaxis(fig_nama_pl, top_nama_pl["Sisa_Hutang"].max() if not top_nama_pl.empty else 0)
+                        st.plotly_chart(fig_nama_pl, use_container_width=True)
 
-                    ordered_pl = ["Nama Pelanggan"]
-                    if "Kode Lapak" in tabel_nama_pl.columns:      ordered_pl.append("Kode Lapak")
-                    if "Total Piutang" in tabel_nama_pl.columns:   ordered_pl.append("Total Piutang")
-                    if "Total Terbayar" in tabel_nama_pl.columns:  ordered_pl.append("Total Terbayar")
-                    ordered_pl.append("Sisa Piutang")
+                        # Tabel lengkap semua nama sesuai filter lapak (yang sudah lunas disembunyikan)
+                        tabel_nama_pl = per_nama_pl.copy()
+                        rename_pl = {nama_col_pl: "Nama Pelanggan", "Sisa_Hutang": "Sisa Piutang"}
+                        if kode_col_pl:
+                            rename_pl[kode_col_pl] = "Kode Lapak"
+                        tabel_nama_pl["Sisa_Hutang"] = per_nama_pl["Sisa_Hutang"].apply(rp)
+                        if "Total_Hutang" in tabel_nama_pl.columns:
+                            tabel_nama_pl["Total_Hutang"] = per_nama_pl["Total_Hutang"].apply(rp)
+                            rename_pl["Total_Hutang"] = "Total Piutang"
+                        if "Total_Terbayar" in tabel_nama_pl.columns:
+                            tabel_nama_pl["Total_Terbayar"] = per_nama_pl["Total_Terbayar"].apply(rp)
+                            rename_pl["Total_Terbayar"] = "Total Terbayar"
+                        tabel_nama_pl = tabel_nama_pl.rename(columns=rename_pl)
 
-                    st.markdown(f"**Total: {len(tabel_nama_pl)} pelanggan**")
-                    st.dataframe(tabel_nama_pl[ordered_pl], use_container_width=True, hide_index=True)
+                        ordered_pl = ["Nama Pelanggan"]
+                        if "Kode Lapak" in tabel_nama_pl.columns:      ordered_pl.append("Kode Lapak")
+                        if "Total Piutang" in tabel_nama_pl.columns:   ordered_pl.append("Total Piutang")
+                        if "Total Terbayar" in tabel_nama_pl.columns:  ordered_pl.append("Total Terbayar")
+                        ordered_pl.append("Sisa Piutang")
+
+                        st.markdown(f"**Total: {len(tabel_nama_pl)} pelanggan masih memiliki sisa piutang**")
+                        st.dataframe(tabel_nama_pl[ordered_pl], use_container_width=True, hide_index=True)
             elif not nama_col_pl:
                 st.info("Kolom 'NAMA' / 'NAMA PELANGGAN' tidak ditemukan di sheet PIUTANG LAPAK, sehingga daftar per nama pelanggan tidak bisa ditampilkan.")
 
@@ -1825,6 +1789,9 @@ with tab4:
                     .reset_index()
                     .sort_values("Sisa_Hutang", ascending=False)
                 )
+
+                # [CHANGE] Sembunyikan pelanggan yang sudah lunas (sisa piutang 0 atau kurang)
+                per_nama = per_nama[per_nama["Sisa_Hutang"].fillna(0) > 0].reset_index(drop=True)
 
                 fig_per_nama = go.Figure()
                 fig_per_nama.add_trace(go.Bar(
