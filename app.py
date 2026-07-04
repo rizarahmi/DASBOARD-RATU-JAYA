@@ -768,35 +768,29 @@ _BULAN_ID_MAP = {
     "nov": 11, "des": 12, "dec": 12,
 }
 
-def _parse_bulan_label(x) -> pd.Timestamp:
-    """Parse isi kolom BULAN jadi tanggal awal bulan (tanggal 1), supaya bisa
-    dicocokkan dengan filter rentang tanggal di sidebar. Mendukung format tanggal
-    biasa (mis. 01/01/2026) maupun nama bulan Indonesia (mis. 'Januari 2026', 'Jan-26')."""
+def _parse_bulan_number(x):
+    """Ambil NOMOR BULAN (1-12) dari isi kolom BULAN, mis. 'Juni' -> 6, 'Juli' -> 7,
+    '7' -> 7, atau '01/07/2026' -> 7. Kolom BULAN di sheet tidak mencantumkan tahun,
+    jadi pencocokan filter dilakukan berdasarkan nomor bulan saja (bukan tanggal utuh)."""
     if pd.isna(x):
-        return pd.NaT
+        return np.nan
     s = str(x).strip()
     if s == "":
-        return pd.NaT
+        return np.nan
+    low = s.lower()
+    if low in _BULAN_ID_MAP:
+        return _BULAN_ID_MAP[low]
+    for token in low.replace("-", " ").replace("/", " ").replace(",", " ").split():
+        if token in _BULAN_ID_MAP:
+            return _BULAN_ID_MAP[token]
+    if s.isdigit():
+        n = int(s)
+        if 1 <= n <= 12:
+            return n
     dt = pd.to_datetime(s, dayfirst=True, errors="coerce")
     if pd.notna(dt):
-        return pd.Timestamp(year=dt.year, month=dt.month, day=1)
-    low = s.lower().replace("-", " ").replace("/", " ").replace(",", " ")
-    bulan_num, tahun = None, None
-    for p in [p for p in low.split() if p]:
-        if p in _BULAN_ID_MAP:
-            bulan_num = _BULAN_ID_MAP[p]
-        elif p.isdigit():
-            n = int(p)
-            if n > 31:
-                tahun = n
-            elif len(p) == 2 and tahun is None:
-                tahun = 2000 + n
-    if bulan_num and tahun:
-        try:
-            return pd.Timestamp(year=tahun, month=bulan_num, day=1)
-        except Exception:
-            return pd.NaT
-    return pd.NaT
+        return dt.month
+    return np.nan
 
 
 @st.cache_data(ttl=300, show_spinner="Memuat Biaya Berjalan Bulanan...")
@@ -812,7 +806,7 @@ def load_biaya_berjalan_bulanan() -> pd.DataFrame:
     out.columns = ["BULAN", "BIAYA BERJALAN"]
     out["BIAYA BERJALAN"] = to_number(out["BIAYA BERJALAN"])
     out = out[out["BULAN"].apply(is_filled) & out["BIAYA BERJALAN"].notna()].reset_index(drop=True)
-    out["Bulan_Tanggal"] = out["BULAN"].apply(_parse_bulan_label)
+    out["Bulan_Num"] = out["BULAN"].apply(_parse_bulan_number)
     return out
 
 
@@ -947,14 +941,14 @@ if date_range and isinstance(date_range, tuple) and len(date_range) == 2:
             (df_tanaman_sudah_filtered["_tgl_parsed"] <= end_ts)
         ].drop(columns=["_tgl_parsed"])
 
-    # Filter Biaya Berjalan Bulanan berdasarkan kolom BULAN (dicocokkan per bulan,
-    # bukan tanggal persis). Baris yang bulannya gagal terbaca tetap disertakan
-    # agar biaya tidak hilang begitu saja.
-    if not df_biaya_bulanan.empty and "Bulan_Tanggal" in df_biaya_bulanan.columns:
-        _per_start = start_ts.to_period("M")
-        _per_end   = end_ts.to_period("M")
-        _bulan_per = df_biaya_bulanan["Bulan_Tanggal"].dt.to_period("M")
-        _mask_bb = ((_bulan_per >= _per_start) & (_bulan_per <= _per_end)) | df_biaya_bulanan["Bulan_Tanggal"].isna()
+    # Filter Biaya Berjalan Bulanan berdasarkan NOMOR BULAN (kolom BULAN tidak
+    # mencantumkan tahun, mis. isinya cuma "Juni", "Juli", dst). Cocokkan dengan
+    # semua nomor bulan yang tercakup rentang tanggal filter. Baris yang bulannya
+    # gagal terbaca tetap disertakan agar biaya tidak hilang begitu saja.
+    if not df_biaya_bulanan.empty and "Bulan_Num" in df_biaya_bulanan.columns:
+        _bulan_periods = pd.period_range(start=start_ts, end=end_ts, freq="M")
+        _bulan_terpilih = set(p.month for p in _bulan_periods)
+        _mask_bb = df_biaya_bulanan["Bulan_Num"].isin(_bulan_terpilih) | df_biaya_bulanan["Bulan_Num"].isna()
         df_biaya_bulanan = df_biaya_bulanan[_mask_bb]
 
 # ============================================================
