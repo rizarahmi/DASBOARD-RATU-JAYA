@@ -760,6 +760,22 @@ def load_tanaman_sudah_panen() -> pd.DataFrame:
     return fetch_clean_csv(SHEET_TANAMAN_SUDAH)
 
 
+@st.cache_data(ttl=300, show_spinner="Memuat Biaya Berjalan Bulanan...")
+def load_biaya_berjalan_bulanan() -> pd.DataFrame:
+    """Tabel baru di sheet TANAMAN BELUM PANEN, kolom O (index 14) & P (index 15):
+    total biaya berjalan BULANAN (bukan per mandor/baris lahan). Dibaca berdasarkan
+    posisi kolom (bukan nama header) agar tidak tertukar dengan tabel utama."""
+    df = fetch_raw_csv(SHEET_TANAMAN_BELUM)
+    if df.empty or len(df.columns) <= 15:
+        return pd.DataFrame()
+    all_cols = list(df.columns)
+    out = df[[all_cols[14], all_cols[15]]].copy()   # kolom O & P
+    out.columns = ["BULAN", "BIAYA BERJALAN"]
+    out["BIAYA BERJALAN"] = to_number(out["BIAYA BERJALAN"])
+    out = out[out["BULAN"].apply(is_filled) & out["BIAYA BERJALAN"].notna()].reset_index(drop=True)
+    return out
+
+
 # ============================================================
 # LOAD SEMUA DATA
 # ============================================================
@@ -774,6 +790,7 @@ try:
     df_ekspedisi_raw      = load_ekspedisi()
     df_tanaman_belum      = load_tanaman_belum_panen()
     df_tanaman_sudah      = load_tanaman_sudah_panen()
+    df_biaya_bulanan_raw  = load_biaya_berjalan_bulanan()
     df_kerugian_gudang_raw = load_kerugian_gudang()
     df_hutang_pake_tani_raw = load_hutang_pake_tani()
 except Exception as e:
@@ -914,10 +931,17 @@ def _find_col_tanaman(df, keywords):
     return next((c for c in df.columns if any(k in c.strip().lower() for k in keywords)), None)
 
 _omzet_col_tp = _find_col_tanaman(df_tanaman_sudah_filtered, ["omzet", "total harga", "pendapatan"])
-_laba_col_tp  = _find_col_tanaman(df_tanaman_sudah_filtered, ["laba", "keuntungan", "profit"])
 
 omzet_tanaman = to_number(df_tanaman_sudah_filtered[_omzet_col_tp]).sum() if _omzet_col_tp else 0
-laba_tanaman  = to_number(df_tanaman_sudah_filtered[_laba_col_tp]).sum()  if _laba_col_tp  else 0
+
+# [CHANGE] Laba Tanaman = Omzet − Total Biaya Berjalan Bulanan
+# (tabel baru kolom O-P sheet TANAMAN BELUM PANEN: total bulanan, bukan per mandor)
+biaya_berjalan_bulanan = (
+    df_biaya_bulanan_raw["BIAYA BERJALAN"].sum()
+    if not df_biaya_bulanan_raw.empty and "BIAYA BERJALAN" in df_biaya_bulanan_raw.columns
+    else 0
+)
+laba_tanaman = omzet_tanaman - biaya_berjalan_bulanan
 
 total_omzet = omzet_lapak + omzet_lapak_luar + omzet_ekspedisi + omzet_tanaman
 total_laba  = laba_lapak + laba_lapak_luar + laba_ekspedisi + laba_tanaman
@@ -983,13 +1007,19 @@ with tab1:
 
     with st.container(border=True):
         st.markdown('<div class="income-card-title">🌱 Pendapatan Tanaman Panen</div>', unsafe_allow_html=True)
-        tp1, tp2 = st.columns(2)
-        tp1.metric("Omzet Tanaman Panen", rp(omzet_tanaman))
-        tp2.metric("Laba Tanaman Panen",  rp(laba_tanaman))
-        if not _omzet_col_tp and not _laba_col_tp:
-            st.caption("⚠️ Kolom Omzet/Laba tidak ditemukan di sheet 'TANAMAN PANEN'.")
+        tp1, tp2, tp3 = st.columns(3)
+        tp1.metric("Omzet Tanaman Panen",    rp(omzet_tanaman))
+        tp2.metric("Biaya Berjalan Bulanan", rp(biaya_berjalan_bulanan))
+        tp3.metric("Laba Tanaman Panen",     rp(laba_tanaman))
+        if not _omzet_col_tp:
+            st.caption("⚠️ Kolom Omzet tidak ditemukan di sheet 'TANAMAN PANEN'.")
         else:
-            st.caption("Mengikuti filter rentang tanggal sidebar (berdasarkan kolom Tanggal Panen).")
+            st.caption("Laba = Omzet − Total Biaya Berjalan Bulanan (kolom O-P sheet 'TANAMAN BELUM PANEN'). Omzet mengikuti filter tanggal sidebar (kolom Tanggal Panen); Biaya Berjalan Bulanan adalah total seluruh bulan.")
+        if not df_biaya_bulanan_raw.empty:
+            with st.expander("📅 Rincian Biaya Berjalan per Bulan"):
+                _tbl_bb = df_biaya_bulanan_raw.copy()
+                _tbl_bb["BIAYA BERJALAN"] = df_biaya_bulanan_raw["BIAYA BERJALAN"].apply(rp)
+                st.dataframe(_tbl_bb, use_container_width=True, hide_index=True)
 
     st.divider()
     section_heading("📊 Komposisi Omzet & Laba Keseluruhan")
@@ -1627,13 +1657,14 @@ with tab3:
             else:
                 panen_s2.info("Kolom Laba tidak ditemukan")
 
+            # [CHANGE] Total Luas Panen TIDAK mengikuti filter tanggal — selalu total keseluruhan
             if luas_col_sudah:
-                total_luas_panen = df_tanaman_sudah_filtered[luas_col_sudah].sum() if luas_col_sudah in df_tanaman_sudah_filtered.columns else df_tanaman_sudah[luas_col_sudah].sum()
-                panen_s3.metric("🌍 Total Luas Panen (Filter)", f"{total_luas_panen:,.2f} Ha")
+                total_luas_panen = df_tanaman_sudah[luas_col_sudah].sum()
+                panen_s3.metric("🌍 Total Luas Panen", f"{total_luas_panen:,.2f} Ha")
             else:
                 panen_s3.info("Kolom Luas (Ha) tidak ditemukan")
 
-            st.caption("Data di bawah menampilkan seluruh data (tidak difilter). Metrik di atas (Omzet, Laba, Luas) mengikuti filter rentang tanggal sidebar berdasarkan kolom Tanggal Panen.")
+            st.caption("Omzet & Laba mengikuti filter rentang tanggal sidebar (kolom Tanggal Panen). Total Luas Panen selalu menampilkan keseluruhan data (tidak difilter). Tabel di bawah menampilkan seluruh data (tidak difilter).")
             st.markdown(f"**Total Lahan Panen: {len(df_tanaman_sudah)} baris**")
             st.dataframe(format_money_table(df_tanaman_sudah), use_container_width=True, hide_index=True)
         else:
