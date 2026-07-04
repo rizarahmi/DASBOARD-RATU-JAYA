@@ -760,6 +760,45 @@ def load_tanaman_sudah_panen() -> pd.DataFrame:
     return fetch_clean_csv(SHEET_TANAMAN_SUDAH)
 
 
+_BULAN_ID_MAP = {
+    "januari": 1, "februari": 2, "maret": 3, "april": 4, "mei": 5, "juni": 6,
+    "juli": 7, "agustus": 8, "september": 9, "oktober": 10, "november": 11, "desember": 12,
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "jun": 6, "jul": 7,
+    "agt": 8, "agu": 8, "aug": 8, "sep": 9, "sept": 9, "okt": 10, "oct": 10,
+    "nov": 11, "des": 12, "dec": 12,
+}
+
+def _parse_bulan_label(x) -> pd.Timestamp:
+    """Parse isi kolom BULAN jadi tanggal awal bulan (tanggal 1), supaya bisa
+    dicocokkan dengan filter rentang tanggal di sidebar. Mendukung format tanggal
+    biasa (mis. 01/01/2026) maupun nama bulan Indonesia (mis. 'Januari 2026', 'Jan-26')."""
+    if pd.isna(x):
+        return pd.NaT
+    s = str(x).strip()
+    if s == "":
+        return pd.NaT
+    dt = pd.to_datetime(s, dayfirst=True, errors="coerce")
+    if pd.notna(dt):
+        return pd.Timestamp(year=dt.year, month=dt.month, day=1)
+    low = s.lower().replace("-", " ").replace("/", " ").replace(",", " ")
+    bulan_num, tahun = None, None
+    for p in [p for p in low.split() if p]:
+        if p in _BULAN_ID_MAP:
+            bulan_num = _BULAN_ID_MAP[p]
+        elif p.isdigit():
+            n = int(p)
+            if n > 31:
+                tahun = n
+            elif len(p) == 2 and tahun is None:
+                tahun = 2000 + n
+    if bulan_num and tahun:
+        try:
+            return pd.Timestamp(year=tahun, month=bulan_num, day=1)
+        except Exception:
+            return pd.NaT
+    return pd.NaT
+
+
 @st.cache_data(ttl=300, show_spinner="Memuat Biaya Berjalan Bulanan...")
 def load_biaya_berjalan_bulanan() -> pd.DataFrame:
     """Tabel baru di sheet TANAMAN BELUM PANEN, kolom O (index 14) & P (index 15):
@@ -773,6 +812,7 @@ def load_biaya_berjalan_bulanan() -> pd.DataFrame:
     out.columns = ["BULAN", "BIAYA BERJALAN"]
     out["BIAYA BERJALAN"] = to_number(out["BIAYA BERJALAN"])
     out = out[out["BULAN"].apply(is_filled) & out["BIAYA BERJALAN"].notna()].reset_index(drop=True)
+    out["Bulan_Tanggal"] = out["BULAN"].apply(_parse_bulan_label)
     return out
 
 
@@ -856,6 +896,7 @@ df_ekspedisi             = df_ekspedisi_raw.copy()
 df_piutang_filtered      = df_piutang_raw.copy()
 df_piutang_luar_filtered = df_piutang_luar_raw.copy()
 df_tanaman_sudah_filtered = df_tanaman_sudah.copy()
+df_biaya_bulanan         = df_biaya_bulanan_raw.copy()
 
 if date_range and isinstance(date_range, tuple) and len(date_range) == 2:
     start_ts = pd.Timestamp(date_range[0])
@@ -906,6 +947,16 @@ if date_range and isinstance(date_range, tuple) and len(date_range) == 2:
             (df_tanaman_sudah_filtered["_tgl_parsed"] <= end_ts)
         ].drop(columns=["_tgl_parsed"])
 
+    # Filter Biaya Berjalan Bulanan berdasarkan kolom BULAN (dicocokkan per bulan,
+    # bukan tanggal persis). Baris yang bulannya gagal terbaca tetap disertakan
+    # agar biaya tidak hilang begitu saja.
+    if not df_biaya_bulanan.empty and "Bulan_Tanggal" in df_biaya_bulanan.columns:
+        _per_start = start_ts.to_period("M")
+        _per_end   = end_ts.to_period("M")
+        _bulan_per = df_biaya_bulanan["Bulan_Tanggal"].dt.to_period("M")
+        _mask_bb = ((_bulan_per >= _per_start) & (_bulan_per <= _per_end)) | df_biaya_bulanan["Bulan_Tanggal"].isna()
+        df_biaya_bulanan = df_biaya_bulanan[_mask_bb]
+
 # ============================================================
 # KALKULASI UTAMA
 # ============================================================
@@ -937,8 +988,8 @@ omzet_tanaman = to_number(df_tanaman_sudah_filtered[_omzet_col_tp]).sum() if _om
 # [CHANGE] Laba Tanaman = Omzet − Total Biaya Berjalan Bulanan
 # (tabel baru kolom O-P sheet TANAMAN BELUM PANEN: total bulanan, bukan per mandor)
 biaya_berjalan_bulanan = (
-    df_biaya_bulanan_raw["BIAYA BERJALAN"].sum()
-    if not df_biaya_bulanan_raw.empty and "BIAYA BERJALAN" in df_biaya_bulanan_raw.columns
+    df_biaya_bulanan["BIAYA BERJALAN"].sum()
+    if not df_biaya_bulanan.empty and "BIAYA BERJALAN" in df_biaya_bulanan.columns
     else 0
 )
 laba_tanaman = omzet_tanaman - biaya_berjalan_bulanan
@@ -1014,11 +1065,11 @@ with tab1:
         if not _omzet_col_tp:
             st.caption("⚠️ Kolom Omzet tidak ditemukan di sheet 'TANAMAN PANEN'.")
         else:
-            st.caption("Laba = Omzet − Total Biaya Berjalan Bulanan (kolom O-P sheet 'TANAMAN BELUM PANEN'). Omzet mengikuti filter tanggal sidebar (kolom Tanggal Panen); Biaya Berjalan Bulanan adalah total seluruh bulan.")
-        if not df_biaya_bulanan_raw.empty:
-            with st.expander("📅 Rincian Biaya Berjalan per Bulan"):
-                _tbl_bb = df_biaya_bulanan_raw.copy()
-                _tbl_bb["BIAYA BERJALAN"] = df_biaya_bulanan_raw["BIAYA BERJALAN"].apply(rp)
+            st.caption("Laba = Omzet − Total Biaya Berjalan Bulanan (kolom O-P sheet 'TANAMAN BELUM PANEN'). Omzet & Biaya Berjalan Bulanan mengikuti filter rentang tanggal sidebar (biaya dicocokkan berdasarkan bulan).")
+        if not df_biaya_bulanan.empty:
+            with st.expander("📅 Rincian Biaya Berjalan per Bulan (sesuai filter)"):
+                _tbl_bb = df_biaya_bulanan[["BULAN", "BIAYA BERJALAN"]].copy()
+                _tbl_bb["BIAYA BERJALAN"] = df_biaya_bulanan["BIAYA BERJALAN"].apply(rp)
                 st.dataframe(_tbl_bb, use_container_width=True, hide_index=True)
 
     st.divider()
