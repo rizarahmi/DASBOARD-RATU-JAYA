@@ -2169,6 +2169,7 @@ with tab7:
                 mode="lines+markers", line=dict(color="#ff7f0e", width=2), marker=dict(size=8)
             ))
             fig_eks.update_layout(
+                barmode="group",
                 title="Pendapatan vs Pengeluaran Ekspedisi per Bulan (Seluruh Data, Tidak Difilter)",
                 yaxis_title="Rupiah", xaxis_title="Bulan"
             )
