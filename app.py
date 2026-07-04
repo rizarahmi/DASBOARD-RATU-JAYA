@@ -2141,12 +2141,14 @@ with tab7:
 
         st.divider()
 
-        if "Tanggal_Lengkap" in df_ekspedisi.columns:
-            df_eks_plot = df_ekspedisi.copy()
+        # [CHANGE] Grafik ini SENGAJA pakai df_ekspedisi_raw (bukan df_ekspedisi)
+        # supaya TIDAK ikut filter tanggal sidebar — selalu tampilkan semua bulan.
+        if not df_ekspedisi_raw.empty and "Tanggal_Lengkap" in df_ekspedisi_raw.columns:
+            df_eks_plot = df_ekspedisi_raw.copy()
             df_eks_plot["Bulan_Label"] = df_eks_plot["Tanggal_Lengkap"].dt.to_period("M").astype(str)
             eks_bulanan = df_eks_plot.groupby("Bulan_Label").agg(
                 Pendapatan=("PENDAPATAN", "sum"), Pengeluaran=("PENGELUARAN", "sum")
-            ).reset_index()
+            ).reset_index().sort_values("Bulan_Label")
             eks_bulanan["Laba"] = eks_bulanan["Pendapatan"] - eks_bulanan["Pengeluaran"]
 
             fig_eks = go.Figure()
@@ -2167,11 +2169,12 @@ with tab7:
                 mode="lines+markers", line=dict(color="#ff7f0e", width=2), marker=dict(size=8)
             ))
             fig_eks.update_layout(
-                title="Pendapatan vs Pengeluaran Ekspedisi per Bulan",
+                title="Pendapatan vs Pengeluaran Ekspedisi per Bulan (Seluruh Data, Tidak Difilter)",
                 yaxis_title="Rupiah", xaxis_title="Bulan"
             )
             pad_yaxis(fig_eks, max(eks_bulanan["Pendapatan"].max(), eks_bulanan["Pengeluaran"].max()) if not eks_bulanan.empty else 0)
             st.plotly_chart(fig_eks, use_container_width=True)
+            st.caption("Grafik ini selalu menampilkan semua bulan, tidak mengikuti filter rentang tanggal di sidebar.")
 
         st.divider()
 
