@@ -2566,13 +2566,6 @@ with tab10:
     ]
     # Urutan TAMPIL: sesuai urutan kategori yang diminta
     URUTAN_TAMPIL = ["Kantor", "Beban", "Angsuran Mobil", "Gaji Kantor", "Barang Kantor"]
-    WARNA_KATEGORI = {
-        "Kantor":         "#1f77b4",
-        "Beban":          "#d62728",
-        "Angsuran Mobil": "#ff7f0e",
-        "Gaji Kantor":    "#9467bd",
-        "Barang Kantor":  "#8c564b",
-    }
 
     ada_kas = (not df_kas_raw.empty) and ("JENIS" in df_kas_raw.columns) and ("KAS KELUAR" in df_kas_raw.columns)
 
@@ -2590,32 +2583,8 @@ with tab10:
         semua_jenis = []
         deteksi_otomatis = {nama: [] for nama in URUTAN_TAMPIL}
 
-    # ── Panel kategori (otomatis terdeteksi, bisa disesuaikan manual) ───────
-    with st.container(border=True):
-        st.markdown('<div class="income-card-title">⚙️ Kategori Pengeluaran Kantor (Deduksi Net Income)</div>', unsafe_allow_html=True)
-        if not ada_kas:
-            st.info("Sheet ARUS KAS / kolom JENIS & KAS KELUAR tidak ditemukan, sehingga deduksi kategori tidak bisa dihitung. Net Income akan sama dengan Total Laba.")
-            pilihan_kategori = {nama: [] for nama in URUTAN_TAMPIL}
-        else:
-            st.caption(
-                "Nilai JENIS pada sheet ARUS KAS otomatis dikelompokkan ke 5 kategori berikut berdasarkan kata kunci "
-                "(mis. JENIS yang mengandung 'GAJI KANTOR' otomatis masuk kategori Gaji Kantor). Sesuaikan bila ada "
-                "JENIS yang salah kelompok, belum tertangkap, atau ingin dikecualikan dari perhitungan."
-            )
-            pilihan_kategori = {}
-            kolom_kategori = st.columns(5)
-            for i, nama in enumerate(URUTAN_TAMPIL):
-                with kolom_kategori[i]:
-                    pilihan_kategori[nama] = st.multiselect(
-                        nama, options=semua_jenis, default=deteksi_otomatis.get(nama, []),
-                        key=f"ni_kategori_{nama}"
-                    )
-            jenis_terpakai = set(jv for nama in URUTAN_TAMPIL for jv in pilihan_kategori[nama])
-            jenis_tidak_terpakai = [jv for jv in semua_jenis if jv not in jenis_terpakai]
-            if jenis_tidak_terpakai:
-                tampil_list = ", ".join(jenis_tidak_terpakai[:15])
-                lebih = f" (+{len(jenis_tidak_terpakai) - 15} lainnya)" if len(jenis_tidak_terpakai) > 15 else ""
-                st.caption(f"ℹ️ JENIS arus kas lain yang **tidak** termasuk deduksi Net Income: {tampil_list}{lebih}.")
+    # Kategori pengeluaran dipakai langsung dari hasil deteksi otomatis (tanpa panel pengaturan)
+    pilihan_kategori = deteksi_otomatis
 
     # ── Hitung pengeluaran per kategori (mengikuti filter tanggal sidebar) ──
     if not df_kas.empty and "JENIS" in df_kas.columns and "KAS KELUAR" in df_kas.columns:
@@ -2701,42 +2670,8 @@ with tab10:
 
     st.divider()
 
-    # ── Breakdown per Kategori ───────────────────────────────────────────────
+    # ── Rincian Pengeluaran per Kategori (tabel saja) ────────────────────────
     section_heading("📊 Rincian Pengeluaran per Kategori")
-    bcol1, bcol2 = st.columns([3, 2])
-
-    with bcol1:
-        fig_bar_kat = go.Figure(go.Bar(
-            x=URUTAN_TAMPIL,
-            y=[pengeluaran_per_kategori[n] for n in URUTAN_TAMPIL],
-            marker_color=[WARNA_KATEGORI[n] for n in URUTAN_TAMPIL],
-            text=[rp_short(pengeluaran_per_kategori[n]) for n in URUTAN_TAMPIL],
-            textposition="outside", textfont=dict(size=13)
-        ))
-        fig_bar_kat.update_layout(
-            title="Total Pengeluaran per Kategori",
-            xaxis_title="Kategori", yaxis_title="Rupiah",
-            showlegend=False, height=420
-        )
-        pad_yaxis(fig_bar_kat, max(pengeluaran_per_kategori.values()) if pengeluaran_per_kategori else 0)
-        st.plotly_chart(fig_bar_kat, use_container_width=True)
-
-    with bcol2:
-        if total_pengeluaran_kategori > 0:
-            fig_pie_kat = px.pie(
-                names=URUTAN_TAMPIL,
-                values=[pengeluaran_per_kategori[n] for n in URUTAN_TAMPIL],
-                title="Proporsi Pengeluaran per Kategori",
-                color=URUTAN_TAMPIL,
-                color_discrete_map=WARNA_KATEGORI,
-                hole=0.45
-            )
-            fig_pie_kat.update_traces(textinfo="label+percent", textfont_size=12)
-            fig_pie_kat.update_layout(height=420)
-            st.plotly_chart(fig_pie_kat, use_container_width=True)
-        else:
-            st.info("Belum ada pengeluaran pada kategori-kategori ini untuk periode terpilih.")
-
     tabel_kat = pd.DataFrame({
         "Kategori": URUTAN_TAMPIL,
         "Jumlah JENIS Terpilih": [len(pilihan_kategori[n]) for n in URUTAN_TAMPIL],
@@ -2746,34 +2681,7 @@ with tab10:
 
     st.divider()
 
-    # ── Tren Bulanan Pengeluaran Kategori ────────────────────────────────────
     jenis_ke_kategori = {jv: nama for nama in URUTAN_TAMPIL for jv in pilihan_kategori[nama]}
-
-    if not df_kas_deduksi.empty and "Tanggal_Kas" in df_kas_deduksi.columns:
-        section_heading("📅 Tren Bulanan Pengeluaran Kategori Kantor")
-        df_tren = df_kas_deduksi.copy()
-        df_tren["Kategori"] = df_tren["JENIS"].map(jenis_ke_kategori)
-        df_tren = df_tren[df_tren["Tanggal_Kas"].notna()]
-        if not df_tren.empty:
-            df_tren["Bulan_Label"] = df_tren["Tanggal_Kas"].dt.to_period("M").astype(str)
-            tren_bulanan = df_tren.groupby(["Bulan_Label", "Kategori"])["KAS KELUAR"].sum().reset_index()
-
-            fig_tren = px.bar(
-                tren_bulanan, x="Bulan_Label", y="KAS KELUAR", color="Kategori",
-                barmode="stack",
-                title="Pengeluaran Kategori Kantor per Bulan",
-                color_discrete_map=WARNA_KATEGORI,
-                text=tren_bulanan["KAS KELUAR"].apply(rp_short)
-            )
-            fig_tren.update_traces(textposition="inside", textfont_size=10)
-            totals_per_bulan = tren_bulanan.groupby("Bulan_Label")["KAS KELUAR"].sum()
-            pad_yaxis(fig_tren, totals_per_bulan.max() if not totals_per_bulan.empty else 0)
-            fig_tren.update_layout(
-                xaxis_title="Bulan", yaxis_title="Rupiah", height=420,
-                yaxis_tickformat=",", legend=dict(orientation="h", yanchor="bottom", y=1.02)
-            )
-            st.plotly_chart(fig_tren, use_container_width=True)
-            st.divider()
 
     # ── Detail Transaksi ──────────────────────────────────────────────────────
     section_heading("📄 Detail Transaksi Arus Kas (Kategori Terpilih)")
