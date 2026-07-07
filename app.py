@@ -139,6 +139,13 @@ SHEET_TANAMAN_SUDAH   = "TANAMAN PANEN"
 SHEET_KERUGIAN_GUDANG = "KERUGIAN GUDANG"
 SHEET_HUTANG_PAKE_TANI = "HUTANG PAK'E TANI"
 
+# --- Spreadsheet TERPISAH khusus data Green House (bukan SPREADSHEET_ID utama) ---
+GH_SPREADSHEET_ID  = "17MhBomkR5qaLs0tOu6CO4H1pDTn1BV6_7hxOrvcVWSE"
+SHEET_GH_BAHAN     = "BAHAN"
+SHEET_GH_PEMUPUKAN = "PEMUPUKAN"
+SHEET_GH_TENAGA    = "TENAGA"
+SHEET_GH_LOKASI    = "LOKASI"
+
 # Harga tetap per KG untuk Cok AB dan Cok RUT
 HARGA_COK_AB  = 4428
 HARGA_COK_RUT = 2214
@@ -357,9 +364,10 @@ def run_prophet(df_known, df_future, use_mbg=False):
 # BACA G-SHEETS
 # ============================================================
 @st.cache_data(ttl=300, show_spinner=False)
-def fetch_raw_csv(sheet_name: str) -> pd.DataFrame:
+def fetch_raw_csv(sheet_name: str, spreadsheet_id: str = None) -> pd.DataFrame:
+    sid = spreadsheet_id or SPREADSHEET_ID
     encoded = urllib.parse.quote(sheet_name)
-    url = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/gviz/tq?tqx=out:csv&sheet={encoded}"
+    url = f"https://docs.google.com/spreadsheets/d/{sid}/gviz/tq?tqx=out:csv&sheet={encoded}"
     try:
         df = pd.read_csv(url, dtype=str, header=0)
     except Exception as e:
@@ -813,6 +821,134 @@ def load_biaya_berjalan_bulanan() -> pd.DataFrame:
 
 
 # ============================================================
+# LOADERS - GREEN HOUSE (spreadsheet terpisah: GH_SPREADSHEET_ID)
+# ============================================================
+def _gh_find_col(all_cols, candidates):
+    for cand in candidates:
+        m = [c for c in all_cols if c.strip().upper() == cand.upper()]
+        if m:
+            return m[0]
+    return None
+
+
+def _gh_to_number(series: pd.Series) -> pd.Series:
+    """Parser angka KHUSUS untuk sel Green House yang berformat 'Rp375,000.00'
+    (KOMA = pemisah ribuan, TITIK = desimal / gaya internasional).
+    Sengaja TIDAK pakai to_number() bawaan di atas, karena fungsi itu
+    mengasumsikan format Indonesia (titik ribuan, koma desimal) dan akan
+    salah hitung untuk data Green House (mis. 'Rp375,000.00' bisa kebaca
+    375.0 bukan 375000.0 kalau dipaksa lewat to_number())."""
+    if pd.api.types.is_numeric_dtype(series):
+        return series
+    def parse_val(x):
+        if pd.isna(x):
+            return np.nan
+        x = str(x).strip()
+        if x == "" or x.lower() in ("nan", "none", "-", "rp -", "rp-"):
+            return np.nan
+        x = x.replace("Rp", "").replace("rp", "").strip()
+        x = x.replace(",", "")  # koma = pemisah ribuan -> buang
+        x = "".join(ch for ch in x if ch.isdigit() or ch in ".-")
+        if x in ("", "-", "."):
+            return np.nan
+        return x
+    return pd.to_numeric(series.map(parse_val), errors="coerce")
+
+
+def _gh_normalize_rincian(df: pd.DataFrame) -> pd.DataFrame:
+    """Rapikan kolom yang dipakai bersama oleh sheet BAHAN, PEMUPUKAN, dan TENAGA:
+    Lokasi, Siklus, Nomor GH, Sub Kategori (kalau ada), dan Total. Nama header
+    dicari dulu berdasarkan teks; kalau berbeda sedikit, biarkan apa adanya
+    (tidak dipaksa rename) supaya data tidak hilang."""
+    if df is None or df.empty:
+        return df
+    df = drop_placeholder_cols(df)
+    all_cols = list(df.columns)
+
+    lokasi_col      = _gh_find_col(all_cols, ["Lokasi"])
+    siklus_col      = _gh_find_col(all_cols, ["Siklus"])
+    nomor_gh_col    = _gh_find_col(all_cols, ["Nomor GH", "No GH", "No. GH", "GH"])
+    subkategori_col = _gh_find_col(all_cols, ["Sub Kategori", "Subkategori", "Sub-Kategori"])
+    total_col       = _gh_find_col(all_cols, ["Total"])
+
+    rename_map = {}
+    for col, target in [
+        (lokasi_col, "Lokasi"), (siklus_col, "Siklus"), (nomor_gh_col, "Nomor GH"),
+        (subkategori_col, "Sub Kategori"), (total_col, "Total"),
+    ]:
+        if col and col != target:
+            rename_map[col] = target
+    if rename_map:
+        df = df.rename(columns=rename_map)
+
+    # Semua kolom nominal (Total, Harga, Harga/Unit, dst.) pakai parser khusus GH
+    # di atas, BUKAN to_number() generik, karena format selnya 'Rp375,000.00'.
+    for c in list(df.columns):
+        cu = c.strip().upper()
+        if cu == "TOTAL" or "HARGA" in cu:
+            df[c] = _gh_to_number(df[c])
+
+    if "Siklus" in df.columns:
+        df["Siklus"] = df["Siklus"].astype(str).str.strip()
+    if "Lokasi" in df.columns:
+        df = df[df["Lokasi"].apply(is_filled)].reset_index(drop=True)
+
+    return df
+
+
+@st.cache_data(ttl=300, show_spinner="Memuat Data Bahan (Green House)...")
+def load_gh_bahan() -> pd.DataFrame:
+    df = fetch_raw_csv(SHEET_GH_BAHAN, spreadsheet_id=GH_SPREADSHEET_ID)
+    return _gh_normalize_rincian(df)
+
+
+@st.cache_data(ttl=300, show_spinner="Memuat Data Pemupukan (Green House)...")
+def load_gh_pemupukan() -> pd.DataFrame:
+    df = fetch_raw_csv(SHEET_GH_PEMUPUKAN, spreadsheet_id=GH_SPREADSHEET_ID)
+    return _gh_normalize_rincian(df)
+
+
+@st.cache_data(ttl=300, show_spinner="Memuat Data Tenaga (Green House)...")
+def load_gh_tenaga() -> pd.DataFrame:
+    df = fetch_raw_csv(SHEET_GH_TENAGA, spreadsheet_id=GH_SPREADSHEET_ID)
+    return _gh_normalize_rincian(df)
+
+
+@st.cache_data(ttl=300, show_spinner="Memuat Data Lokasi (Green House)...")
+def load_gh_lokasi() -> pd.DataFrame:
+    """Sheet LOKASI: tabel Lokasi + Jumlah GH. Nama header dicari dulu;
+    kalau tidak ketemu, fallback ke posisi kolom A = Lokasi, B = Jumlah GH."""
+    df = fetch_raw_csv(SHEET_GH_LOKASI, spreadsheet_id=GH_SPREADSHEET_ID)
+    if df is None or df.empty:
+        return df
+    df = drop_placeholder_cols(df)
+    all_cols = list(df.columns)
+
+    lokasi_col    = _gh_find_col(all_cols, ["Lokasi"])
+    jumlah_gh_col = _gh_find_col(all_cols, ["Jumlah GH", "Jumlah Green House", "Total GH", "GH"])
+
+    if lokasi_col is None and len(all_cols) > 0:
+        lokasi_col = all_cols[0]
+    if jumlah_gh_col is None and len(all_cols) > 1:
+        jumlah_gh_col = all_cols[1]
+
+    rename_map = {}
+    if lokasi_col and lokasi_col != "Lokasi":
+        rename_map[lokasi_col] = "Lokasi"
+    if jumlah_gh_col and jumlah_gh_col != "Jumlah GH":
+        rename_map[jumlah_gh_col] = "Jumlah GH"
+    if rename_map:
+        df = df.rename(columns=rename_map)
+
+    if "Jumlah GH" in df.columns:
+        df["Jumlah GH"] = _gh_to_number(df["Jumlah GH"])
+    if "Lokasi" in df.columns:
+        df = df[df["Lokasi"].apply(is_filled)].reset_index(drop=True)
+
+    return df
+
+
+# ============================================================
 # LOAD SEMUA DATA
 # ============================================================
 try:
@@ -832,6 +968,20 @@ try:
 except Exception as e:
     st.error(f"Gagal mengambil data. Detail: {e}")
     st.stop()
+
+# Data Green House dimuat TERPISAH (spreadsheet berbeda) supaya kalau sheet ini
+# bermasalah, tab lain tetap jalan normal (tidak ikut st.stop()).
+try:
+    df_gh_bahan_raw     = load_gh_bahan()
+    df_gh_pemupukan_raw = load_gh_pemupukan()
+    df_gh_tenaga_raw    = load_gh_tenaga()
+    df_gh_lokasi_raw    = load_gh_lokasi()
+except Exception as e:
+    st.warning(f"Gagal mengambil data Green House. Detail: {e}")
+    df_gh_bahan_raw     = pd.DataFrame()
+    df_gh_pemupukan_raw = pd.DataFrame()
+    df_gh_tenaga_raw    = pd.DataFrame()
+    df_gh_lokasi_raw    = pd.DataFrame()
 
 # ============================================================
 # SIDEBAR - FILTER
@@ -1003,7 +1153,7 @@ st.divider()
 # ============================================================
 # TABS
 # ============================================================
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11 = st.tabs([
     "💰 Pendapatan",
     "🏪 Analisa Lapak",
     "🌱 Tanaman",
@@ -1014,6 +1164,7 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs([
     "🏭 Kerugian Gudang",
     "🔮 Prediksi Harga",
     "🧮 Net Income",
+    "🌿 Green House",
 ])
 
 # ===========================================================
@@ -2706,3 +2857,147 @@ with tab10:
             mime="text/csv",
             key="net_income_download"
         )
+
+
+# ===========================================================
+# TAB 11: GREEN HOUSE
+# ===========================================================
+with tab11:
+    st.markdown("### 🌿 Green House")
+    st.caption(
+        "Data diambil dari spreadsheet Green House terpisah (sheet BAHAN, PEMUPUKAN, TENAGA, LOKASI). "
+        "Tab ini tidak mengikuti filter rentang tanggal di sidebar — filternya sendiri di bawah."
+    )
+
+    with st.expander("🔍 Debug: Kolom Sheet Green House", expanded=False):
+        st.write("Kolom BAHAN:", list(df_gh_bahan_raw.columns) if not df_gh_bahan_raw.empty else "Sheet kosong/tidak ditemukan.")
+        st.write("Kolom PEMUPUKAN:", list(df_gh_pemupukan_raw.columns) if not df_gh_pemupukan_raw.empty else "Sheet kosong/tidak ditemukan.")
+        st.write("Kolom TENAGA:", list(df_gh_tenaga_raw.columns) if not df_gh_tenaga_raw.empty else "Sheet kosong/tidak ditemukan.")
+        st.write("Kolom LOKASI:", list(df_gh_lokasi_raw.columns) if not df_gh_lokasi_raw.empty else "Sheet kosong/tidak ditemukan.")
+
+    # ── 1. Total Pengeluaran (gabungan BAHAN + PEMUPUKAN + TENAGA) ───────────
+    total_gh_bahan       = df_gh_bahan_raw["Total"].sum()      if not df_gh_bahan_raw.empty      and "Total" in df_gh_bahan_raw.columns      else 0
+    total_gh_pemupukan   = df_gh_pemupukan_raw["Total"].sum()  if not df_gh_pemupukan_raw.empty  and "Total" in df_gh_pemupukan_raw.columns  else 0
+    total_gh_tenaga      = df_gh_tenaga_raw["Total"].sum()     if not df_gh_tenaga_raw.empty     and "Total" in df_gh_tenaga_raw.columns     else 0
+    total_gh_keseluruhan = total_gh_bahan + total_gh_pemupukan + total_gh_tenaga
+
+    st.markdown(
+        '<div class="hero-row">'
+        + hero_card("🌿 Total Pengeluaran Green House", rp(total_gh_keseluruhan), "hero-blue")
+        + '</div>',
+        unsafe_allow_html=True
+    )
+    st.write("")
+
+    with st.container(border=True):
+        st.markdown('<div class="income-card-title">📦 Rincian Total per Kategori</div>', unsafe_allow_html=True)
+        gc1, gc2, gc3 = st.columns(3)
+        gc1.metric("Bahan", rp(total_gh_bahan))
+        gc2.metric("Pemupukan", rp(total_gh_pemupukan))
+        gc3.metric("Tenaga", rp(total_gh_tenaga))
+        st.caption("Total = jumlah kolom 'Total' pada masing-masing sheet BAHAN, PEMUPUKAN, dan TENAGA.")
+
+    st.divider()
+
+    # ── 2. Jumlah GH per Lokasi (dari sheet LOKASI) ──────────────────────────
+    section_heading("🏡 Jumlah GH per Lokasi")
+
+    sumber_ket_lokasi = None
+    if not df_gh_lokasi_raw.empty and "Lokasi" in df_gh_lokasi_raw.columns and "Jumlah GH" in df_gh_lokasi_raw.columns:
+        tabel_gh_lokasi = df_gh_lokasi_raw[["Lokasi", "Jumlah GH"]].copy()
+    else:
+        # Fallback: hitung Nomor GH unik per Lokasi dari data Bahan/Pemupukan/Tenaga
+        frames_for_count = [
+            d[["Lokasi", "Nomor GH"]] for d in [df_gh_bahan_raw, df_gh_pemupukan_raw, df_gh_tenaga_raw]
+            if not d.empty and "Lokasi" in d.columns and "Nomor GH" in d.columns
+        ]
+        if frames_for_count:
+            df_gab_gh = pd.concat(frames_for_count, ignore_index=True)
+            tabel_gh_lokasi = (
+                df_gab_gh.groupby("Lokasi")["Nomor GH"].nunique()
+                .reset_index().rename(columns={"Nomor GH": "Jumlah GH"})
+            )
+            sumber_ket_lokasi = "⚠️ Sheet LOKASI tidak terbaca sesuai format yang diharapkan — jumlah GH di atas dihitung otomatis dari Nomor GH unik pada data Bahan/Pemupukan/Tenaga."
+        else:
+            tabel_gh_lokasi = pd.DataFrame(columns=["Lokasi", "Jumlah GH"])
+
+    if not tabel_gh_lokasi.empty:
+        total_unit_gh = tabel_gh_lokasi["Jumlah GH"].sum()
+        st.metric("Total Unit GH (Seluruh Lokasi)", f"{total_unit_gh:,.0f} GH")
+        if sumber_ket_lokasi:
+            st.caption(sumber_ket_lokasi)
+        st.dataframe(tabel_gh_lokasi, use_container_width=True, hide_index=True)
+    else:
+        st.info("Data jumlah GH per lokasi tidak ditemukan.")
+
+    st.divider()
+
+    # ── 3 & 4. Filter Rincian Pengeluaran ─────────────────────────────────────
+    section_heading("🔍 Rincian Pengeluaran Green House")
+
+    kategori_opts = ["Bahan", "Pemupukan", "Tenaga"]
+    sel_kategori = st.multiselect("Kategori", kategori_opts, default=kategori_opts, key="gh_filter_kategori")
+
+    def _gh_collect_unique(col_name, *dfs):
+        vals = set()
+        for d in dfs:
+            if d is not None and not d.empty and col_name in d.columns:
+                vals.update(d[col_name].dropna().astype(str).unique().tolist())
+        return sorted(vals)
+
+    lokasi_opts      = _gh_collect_unique("Lokasi", df_gh_bahan_raw, df_gh_pemupukan_raw, df_gh_tenaga_raw)
+    siklus_opts      = _gh_collect_unique("Siklus", df_gh_bahan_raw, df_gh_pemupukan_raw, df_gh_tenaga_raw)
+    nomor_gh_opts    = _gh_collect_unique("Nomor GH", df_gh_bahan_raw, df_gh_pemupukan_raw, df_gh_tenaga_raw)
+    subkategori_opts = _gh_collect_unique("Sub Kategori", df_gh_bahan_raw)
+
+    gf1, gf2, gf3 = st.columns(3)
+    sel_lokasi   = gf1.multiselect("Lokasi", lokasi_opts, default=lokasi_opts, key="gh_filter_lokasi")
+    sel_siklus   = gf2.multiselect("Siklus", siklus_opts, default=siklus_opts, key="gh_filter_siklus")
+    sel_nomor_gh = gf3.multiselect("Nomor GH", nomor_gh_opts, default=nomor_gh_opts, key="gh_filter_nomor_gh")
+
+    sel_subkategori = subkategori_opts
+    if "Bahan" in sel_kategori and subkategori_opts:
+        sel_subkategori = st.multiselect(
+            "Sub Kategori (khusus kategori Bahan)", subkategori_opts, default=subkategori_opts,
+            key="gh_filter_subkategori"
+        )
+
+    # Gabungkan sheet yang dipilih, masing-masing ditandai kolom "Kategori"
+    frames = []
+    if "Bahan" in sel_kategori and not df_gh_bahan_raw.empty:
+        tmp = df_gh_bahan_raw.copy(); tmp["Kategori"] = "Bahan"; frames.append(tmp)
+    if "Pemupukan" in sel_kategori and not df_gh_pemupukan_raw.empty:
+        tmp = df_gh_pemupukan_raw.copy(); tmp["Kategori"] = "Pemupukan"; frames.append(tmp)
+    if "Tenaga" in sel_kategori and not df_gh_tenaga_raw.empty:
+        tmp = df_gh_tenaga_raw.copy(); tmp["Kategori"] = "Tenaga"; frames.append(tmp)
+
+    df_gh_gabungan = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+    df_gh_filtered = df_gh_gabungan.copy()
+    if not df_gh_filtered.empty:
+        if "Lokasi" in df_gh_filtered.columns:
+            df_gh_filtered = df_gh_filtered[df_gh_filtered["Lokasi"].astype(str).isin(sel_lokasi)]
+        if "Siklus" in df_gh_filtered.columns:
+            df_gh_filtered = df_gh_filtered[df_gh_filtered["Siklus"].astype(str).isin(sel_siklus)]
+        if "Nomor GH" in df_gh_filtered.columns:
+            df_gh_filtered = df_gh_filtered[df_gh_filtered["Nomor GH"].astype(str).isin(sel_nomor_gh)]
+        if "Sub Kategori" in df_gh_filtered.columns and "Kategori" in df_gh_filtered.columns:
+            # Filter Sub Kategori HANYA berlaku untuk baris Kategori == "Bahan";
+            # baris Pemupukan/Tenaga (tidak punya Sub Kategori) tetap ditampilkan.
+            mask_bahan = df_gh_filtered["Kategori"] == "Bahan"
+            mask_keep = (~mask_bahan) | (df_gh_filtered["Sub Kategori"].astype(str).isin(sel_subkategori))
+            df_gh_filtered = df_gh_filtered[mask_keep]
+
+    st.divider()
+
+    total_gh_filtered = df_gh_filtered["Total"].sum() if not df_gh_filtered.empty and "Total" in df_gh_filtered.columns else 0
+    st.metric("💰 Total Pengeluaran (Sesuai Filter)", rp(total_gh_filtered))
+
+    if df_gh_filtered.empty:
+        st.info("Tidak ada data yang cocok dengan kombinasi filter yang dipilih.")
+    else:
+        cols_priority = [c for c in ["Kategori", "Lokasi", "Siklus", "Nomor GH", "Sub Kategori"] if c in df_gh_filtered.columns]
+        cols_rest = [c for c in df_gh_filtered.columns if c not in cols_priority]
+        df_gh_display = df_gh_filtered[cols_priority + cols_rest].dropna(axis=1, how="all")
+        st.markdown(f"**Total Baris: {len(df_gh_filtered)}**")
+        st.dataframe(format_money_table(df_gh_display), use_container_width=True, hide_index=True)
