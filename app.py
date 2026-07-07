@@ -103,6 +103,8 @@ st.markdown("""
     }
     .hero-blue   { background: linear-gradient(135deg, #1f77b4, #14507a); }
     .hero-green  { background: linear-gradient(135deg, #2ca02c, #1d7a1d); }
+    .hero-orange { background: linear-gradient(135deg, #ff7f0e, #b35900); }
+    .hero-red    { background: linear-gradient(135deg, #d62728, #8b1a1a); }
 
     .income-card-title {
         font-size: 19px;
@@ -1001,7 +1003,7 @@ st.divider()
 # ============================================================
 # TABS
 # ============================================================
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs([
     "💰 Pendapatan",
     "🏪 Analisa Lapak",
     "🌱 Tanaman",
@@ -1011,6 +1013,7 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
     "🚛 Ekspedisi",
     "🏭 Kerugian Gudang",
     "🔮 Prediksi Harga",
+    "🧮 Net Income",
 ])
 
 # ===========================================================
@@ -2538,3 +2541,260 @@ with tab9:
 
             except Exception as e:
                 st.error(f"Terjadi kesalahan saat memproses data prediksi: {str(e)}")
+
+
+# ===========================================================
+# TAB 10: NET INCOME (LABA BERSIH)
+# ===========================================================
+with tab10:
+    st.markdown("### 🧮 Net Income (Laba Bersih)")
+    st.caption(
+        "Net Income dihitung dari **Total Laba** (Lapak + Lapak Luar + Ekspedisi + Tanaman Panen) "
+        "dikurangi **Pengeluaran Arus Kas** dari kategori Kantor, Beban, Angsuran Mobil, Gaji Kantor, "
+        "dan Barang Kantor. Mengikuti filter rentang tanggal di sidebar."
+    )
+
+    # ── Definisi kategori deduksi ────────────────────────────────────────────
+    # Urutan PENCOCOKAN: dari kata kunci paling spesifik ke paling umum, supaya
+    # satu nilai JENIS hanya dihitung masuk ke SATU kategori saja (tidak dobel).
+    URUTAN_PENCOCOKAN = [
+        ("Angsuran Mobil", ["ANGSURAN MOBIL", "CICILAN MOBIL"]),
+        ("Gaji Kantor",    ["GAJI KANTOR"]),
+        ("Barang Kantor",  ["BARANG KANTOR", "PERLENGKAPAN KANTOR", "ATK"]),
+        ("Beban",          ["BEBAN"]),
+        ("Kantor",         ["KANTOR"]),
+    ]
+    # Urutan TAMPIL: sesuai urutan kategori yang diminta
+    URUTAN_TAMPIL = ["Kantor", "Beban", "Angsuran Mobil", "Gaji Kantor", "Barang Kantor"]
+    WARNA_KATEGORI = {
+        "Kantor":         "#1f77b4",
+        "Beban":          "#d62728",
+        "Angsuran Mobil": "#ff7f0e",
+        "Gaji Kantor":    "#9467bd",
+        "Barang Kantor":  "#8c564b",
+    }
+
+    ada_kas = (not df_kas_raw.empty) and ("JENIS" in df_kas_raw.columns) and ("KAS KELUAR" in df_kas_raw.columns)
+
+    if ada_kas:
+        semua_jenis = sorted(df_kas_raw["JENIS"].dropna().unique().tolist())
+        pemetaan_otomatis = {}
+        for nama, keywords in URUTAN_PENCOCOKAN:
+            for jv in semua_jenis:
+                if jv in pemetaan_otomatis:
+                    continue
+                if any(kw in jv for kw in keywords):
+                    pemetaan_otomatis[jv] = nama
+        deteksi_otomatis = {nama: [jv for jv, n in pemetaan_otomatis.items() if n == nama] for nama in URUTAN_TAMPIL}
+    else:
+        semua_jenis = []
+        deteksi_otomatis = {nama: [] for nama in URUTAN_TAMPIL}
+
+    # ── Panel kategori (otomatis terdeteksi, bisa disesuaikan manual) ───────
+    with st.container(border=True):
+        st.markdown('<div class="income-card-title">⚙️ Kategori Pengeluaran Kantor (Deduksi Net Income)</div>', unsafe_allow_html=True)
+        if not ada_kas:
+            st.info("Sheet ARUS KAS / kolom JENIS & KAS KELUAR tidak ditemukan, sehingga deduksi kategori tidak bisa dihitung. Net Income akan sama dengan Total Laba.")
+            pilihan_kategori = {nama: [] for nama in URUTAN_TAMPIL}
+        else:
+            st.caption(
+                "Nilai JENIS pada sheet ARUS KAS otomatis dikelompokkan ke 5 kategori berikut berdasarkan kata kunci "
+                "(mis. JENIS yang mengandung 'GAJI KANTOR' otomatis masuk kategori Gaji Kantor). Sesuaikan bila ada "
+                "JENIS yang salah kelompok, belum tertangkap, atau ingin dikecualikan dari perhitungan."
+            )
+            pilihan_kategori = {}
+            kolom_kategori = st.columns(5)
+            for i, nama in enumerate(URUTAN_TAMPIL):
+                with kolom_kategori[i]:
+                    pilihan_kategori[nama] = st.multiselect(
+                        nama, options=semua_jenis, default=deteksi_otomatis.get(nama, []),
+                        key=f"ni_kategori_{nama}"
+                    )
+            jenis_terpakai = set(jv for nama in URUTAN_TAMPIL for jv in pilihan_kategori[nama])
+            jenis_tidak_terpakai = [jv for jv in semua_jenis if jv not in jenis_terpakai]
+            if jenis_tidak_terpakai:
+                tampil_list = ", ".join(jenis_tidak_terpakai[:15])
+                lebih = f" (+{len(jenis_tidak_terpakai) - 15} lainnya)" if len(jenis_tidak_terpakai) > 15 else ""
+                st.caption(f"ℹ️ JENIS arus kas lain yang **tidak** termasuk deduksi Net Income: {tampil_list}{lebih}.")
+
+    # ── Hitung pengeluaran per kategori (mengikuti filter tanggal sidebar) ──
+    if not df_kas.empty and "JENIS" in df_kas.columns and "KAS KELUAR" in df_kas.columns:
+        pengeluaran_per_kategori = {
+            nama: (df_kas[df_kas["JENIS"].isin(pilihan_kategori[nama])]["KAS KELUAR"].sum() if pilihan_kategori[nama] else 0.0)
+            for nama in URUTAN_TAMPIL
+        }
+        jenis_terpilih_semua = [jv for nama in URUTAN_TAMPIL for jv in pilihan_kategori[nama]]
+        df_kas_deduksi = df_kas[df_kas["JENIS"].isin(jenis_terpilih_semua)].copy() if jenis_terpilih_semua else df_kas.iloc[0:0].copy()
+    else:
+        pengeluaran_per_kategori = {nama: 0.0 for nama in URUTAN_TAMPIL}
+        df_kas_deduksi = pd.DataFrame()
+
+    total_pengeluaran_kategori = sum(pengeluaran_per_kategori.values())
+    laba_bersih = total_laba - total_pengeluaran_kategori
+    margin_bersih = (laba_bersih / total_omzet * 100) if total_omzet > 0 else None
+
+    # ── Hero Metrics ─────────────────────────────────────────────────────────
+    kelas_hero_net = "hero-green" if laba_bersih >= 0 else "hero-red"
+    st.markdown(
+        '<div class="hero-row">'
+        + hero_card("📈 Total Laba", rp(total_laba), "hero-blue")
+        + hero_card("💸 Total Deduksi Arus Kas", rp(total_pengeluaran_kategori), "hero-orange")
+        + hero_card("🧮 Net Income", rp(laba_bersih), kelas_hero_net)
+        + '</div>',
+        unsafe_allow_html=True
+    )
+    if margin_bersih is not None:
+        st.caption(f"📐 Net Margin (Net Income ÷ Total Omzet): **{margin_bersih:.1f}%**")
+
+    if laba_bersih >= 0:
+        st.success(f"✅ Net Income periode ini **positif**: {rp(laba_bersih)}. Total laba masih mampu menutup seluruh pengeluaran kategori kantor.")
+    else:
+        st.error(f"⚠️ Net Income periode ini **negatif**: {rp(laba_bersih)}. Pengeluaran kategori kantor melebihi total laba yang dihasilkan pada periode ini.")
+
+    if total_pengeluaran_kategori > 0:
+        kategori_terbesar = max(pengeluaran_per_kategori, key=pengeluaran_per_kategori.get)
+        pct_terbesar = pengeluaran_per_kategori[kategori_terbesar] / total_pengeluaran_kategori * 100
+        st.caption(f"💡 Kategori deduksi terbesar: **{kategori_terbesar}** — {rp(pengeluaran_per_kategori[kategori_terbesar])} ({pct_terbesar:.0f}% dari total deduksi).")
+
+    st.write("")
+    st.divider()
+
+    # ── Waterfall / Bridge Chart ─────────────────────────────────────────────
+    section_heading("🌊 Alur Perhitungan: Total Laba → Net Income")
+
+    labels_wf   = ["Total Laba"] + URUTAN_TAMPIL + ["Net Income"]
+    measures_wf = ["absolute"] + ["relative"] * len(URUTAN_TAMPIL) + ["total"]
+    values_wf   = [total_laba] + [-pengeluaran_per_kategori[n] for n in URUTAN_TAMPIL] + [0]
+    text_wf     = [rp_short(total_laba)] + [f"-{rp_short(pengeluaran_per_kategori[n])}" for n in URUTAN_TAMPIL] + [rp_short(laba_bersih)]
+
+    fig_wf = go.Figure(go.Waterfall(
+        orientation="v",
+        measure=measures_wf,
+        x=labels_wf,
+        y=values_wf,
+        text=text_wf,
+        textposition="outside",
+        textfont=dict(size=13),
+        connector=dict(line=dict(color="#b0b8c7", width=1.2)),
+        increasing=dict(marker=dict(color="#2ca02c")),
+        decreasing=dict(marker=dict(color="#d62728")),
+        totals=dict(marker=dict(color="#1f3864")),
+    ))
+
+    # Skala sumbu-Y manual mengikuti nilai kumulatif (termasuk kemungkinan negatif)
+    running = total_laba
+    running_series = [running]
+    for n in URUTAN_TAMPIL:
+        running = running - pengeluaran_per_kategori[n]
+        running_series.append(running)
+    wf_low  = min(0, min(running_series))
+    wf_high = max(max(running_series), total_laba)
+    wf_span = max(wf_high - wf_low, 1)
+    fig_wf.update_yaxes(range=[wf_low - wf_span * 0.15, wf_high + wf_span * 0.2])
+    fig_wf.update_traces(cliponaxis=False)
+    fig_wf.update_layout(
+        title="Bridge Chart Net Income",
+        yaxis_title="Rupiah", showlegend=False, height=480,
+        yaxis_tickformat=","
+    )
+    st.plotly_chart(fig_wf, use_container_width=True)
+
+    st.divider()
+
+    # ── Breakdown per Kategori ───────────────────────────────────────────────
+    section_heading("📊 Rincian Pengeluaran per Kategori")
+    bcol1, bcol2 = st.columns([3, 2])
+
+    with bcol1:
+        fig_bar_kat = go.Figure(go.Bar(
+            x=URUTAN_TAMPIL,
+            y=[pengeluaran_per_kategori[n] for n in URUTAN_TAMPIL],
+            marker_color=[WARNA_KATEGORI[n] for n in URUTAN_TAMPIL],
+            text=[rp_short(pengeluaran_per_kategori[n]) for n in URUTAN_TAMPIL],
+            textposition="outside", textfont=dict(size=13)
+        ))
+        fig_bar_kat.update_layout(
+            title="Total Pengeluaran per Kategori",
+            xaxis_title="Kategori", yaxis_title="Rupiah",
+            showlegend=False, height=420
+        )
+        pad_yaxis(fig_bar_kat, max(pengeluaran_per_kategori.values()) if pengeluaran_per_kategori else 0)
+        st.plotly_chart(fig_bar_kat, use_container_width=True)
+
+    with bcol2:
+        if total_pengeluaran_kategori > 0:
+            fig_pie_kat = px.pie(
+                names=URUTAN_TAMPIL,
+                values=[pengeluaran_per_kategori[n] for n in URUTAN_TAMPIL],
+                title="Proporsi Pengeluaran per Kategori",
+                color=URUTAN_TAMPIL,
+                color_discrete_map=WARNA_KATEGORI,
+                hole=0.45
+            )
+            fig_pie_kat.update_traces(textinfo="label+percent", textfont_size=12)
+            fig_pie_kat.update_layout(height=420)
+            st.plotly_chart(fig_pie_kat, use_container_width=True)
+        else:
+            st.info("Belum ada pengeluaran pada kategori-kategori ini untuk periode terpilih.")
+
+    tabel_kat = pd.DataFrame({
+        "Kategori": URUTAN_TAMPIL,
+        "Jumlah JENIS Terpilih": [len(pilihan_kategori[n]) for n in URUTAN_TAMPIL],
+        "Total Pengeluaran": [rp(pengeluaran_per_kategori[n]) for n in URUTAN_TAMPIL],
+    })
+    st.dataframe(tabel_kat, use_container_width=True, hide_index=True)
+
+    st.divider()
+
+    # ── Tren Bulanan Pengeluaran Kategori ────────────────────────────────────
+    jenis_ke_kategori = {jv: nama for nama in URUTAN_TAMPIL for jv in pilihan_kategori[nama]}
+
+    if not df_kas_deduksi.empty and "Tanggal_Kas" in df_kas_deduksi.columns:
+        section_heading("📅 Tren Bulanan Pengeluaran Kategori Kantor")
+        df_tren = df_kas_deduksi.copy()
+        df_tren["Kategori"] = df_tren["JENIS"].map(jenis_ke_kategori)
+        df_tren = df_tren[df_tren["Tanggal_Kas"].notna()]
+        if not df_tren.empty:
+            df_tren["Bulan_Label"] = df_tren["Tanggal_Kas"].dt.to_period("M").astype(str)
+            tren_bulanan = df_tren.groupby(["Bulan_Label", "Kategori"])["KAS KELUAR"].sum().reset_index()
+
+            fig_tren = px.bar(
+                tren_bulanan, x="Bulan_Label", y="KAS KELUAR", color="Kategori",
+                barmode="stack",
+                title="Pengeluaran Kategori Kantor per Bulan",
+                color_discrete_map=WARNA_KATEGORI,
+                text=tren_bulanan["KAS KELUAR"].apply(rp_short)
+            )
+            fig_tren.update_traces(textposition="inside", textfont_size=10)
+            totals_per_bulan = tren_bulanan.groupby("Bulan_Label")["KAS KELUAR"].sum()
+            pad_yaxis(fig_tren, totals_per_bulan.max() if not totals_per_bulan.empty else 0)
+            fig_tren.update_layout(
+                xaxis_title="Bulan", yaxis_title="Rupiah", height=420,
+                yaxis_tickformat=",", legend=dict(orientation="h", yanchor="bottom", y=1.02)
+            )
+            st.plotly_chart(fig_tren, use_container_width=True)
+            st.divider()
+
+    # ── Detail Transaksi ──────────────────────────────────────────────────────
+    section_heading("📄 Detail Transaksi Arus Kas (Kategori Terpilih)")
+    if df_kas_deduksi.empty:
+        st.info("Tidak ada transaksi arus kas yang cocok dengan kategori terpilih pada periode ini.")
+    else:
+        df_detail = df_kas_deduksi.copy()
+        df_detail["Kategori Net Income"] = df_detail["JENIS"].map(jenis_ke_kategori)
+        csv_detail = df_detail.drop(columns=["Tanggal_Kas"], errors="ignore").copy()
+
+        st.markdown(f"**Total Transaksi: {len(df_detail)} baris**")
+        cols_show = [c for c in df_detail.columns if c != "Tanggal_Kas"]
+        st.dataframe(
+            format_money_table(df_detail[cols_show], extra_keywords=["KAS", "SALDO", "MASUK", "KELUAR"]),
+            use_container_width=True, hide_index=True
+        )
+
+        st.download_button(
+            "⬇️ Unduh Detail Transaksi (CSV)",
+            data=csv_detail.to_csv(index=False).encode("utf-8"),
+            file_name="detail_deduksi_net_income.csv",
+            mime="text/csv",
+            key="net_income_download"
+        )
