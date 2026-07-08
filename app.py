@@ -559,6 +559,39 @@ def load_pengeluaran_lapak() -> pd.DataFrame:
         if lokasi_col != "LOKASI LAPAK":
             df.rename(columns={lokasi_col: "LOKASI LAPAK"}, inplace=True)
         df = df[df["LOKASI LAPAK"].apply(is_filled)].reset_index(drop=True)
+
+    # [CHANGE] Kolom kategori pengeluaran (Overhead / HPP). Dua bentuk data didukung:
+    #  (A) satu kolom kategori teks (mis. "JENIS PENGELUARAN") berisi "Overhead"/"HPP",
+    #      berdampingan dengan kolom "NOMINAL" yang sudah ada — dicari lewat daftar
+    #      kandidat nama header di bawah (urutan = prioritas).
+    #  (B) dua kolom nominal terpisah bernama persis "OVERHEAD" dan "HPP" (tanpa kolom
+    #      "NOMINAL" gabungan) — otomatis digabung jadi format panjang (long format)
+    #      dengan kolom "JENIS PENGELUARAN" + "NOMINAL", supaya chart tetap jalan.
+    kategori_col = None
+    for _cand in ["JENIS PENGELUARAN", "KATEGORI PENGELUARAN", "TIPE PENGELUARAN",
+                  "JENIS BIAYA", "KATEGORI BIAYA", "JENIS", "KATEGORI", "TIPE"]:
+        _matches = [c for c in df.columns if c.strip().upper() == _cand]
+        if _matches:
+            kategori_col = _matches[0]
+            break
+    if kategori_col and kategori_col != "JENIS PENGELUARAN":
+        df = df.rename(columns={kategori_col: "JENIS PENGELUARAN"})
+
+    if "JENIS PENGELUARAN" not in df.columns and "NOMINAL" not in df.columns:
+        overhead_col = next((c for c in df.columns if c.strip().upper() == "OVERHEAD"), None)
+        hpp_col      = next((c for c in df.columns if c.strip().upper() == "HPP"), None)
+        if overhead_col and hpp_col:
+            df[overhead_col] = to_number(df[overhead_col])
+            df[hpp_col] = to_number(df[hpp_col])
+            id_cols = [c for c in df.columns if c not in [overhead_col, hpp_col]]
+            df = df.melt(
+                id_vars=id_cols, value_vars=[overhead_col, hpp_col],
+                var_name="JENIS PENGELUARAN", value_name="NOMINAL"
+            )
+            df["JENIS PENGELUARAN"] = df["JENIS PENGELUARAN"].str.strip().str.upper().map(
+                {"OVERHEAD": "Overhead", "HPP": "HPP"}
+            )
+
     return df
 
 
@@ -1534,8 +1567,15 @@ with tab2:
 
         st.divider()
 
-        # ── 5. PENGELUARAN BULANAN PER LAPAK ──────────────────────────────────
-        section_heading("💸 Pengeluaran Bulanan per Lapak")
+        # ── 5. PENGELUARAN PER LAPAK: OVERHEAD vs HPP ──────────────────────────
+        # [CHANGE] Sebelumnya dipecah per bulan (bar bersanding per LOKASI LAPAK).
+        # Sekarang disederhanakan jadi 1 batang per LOKASI LAPAK (tetap mengikuti
+        # filter tanggal sidebar, tapi dijumlah jadi satu angka per lapak untuk
+        # seluruh periode terpilih — tidak dipecah per bulan lagi), di-stack jadi
+        # 2 (atau lebih) segmen warna berdasarkan kategori "JENIS PENGELUARAN"
+        # (Overhead / HPP). Tiap segmen diberi label nominal sendiri, dan total
+        # per lapak ditampilkan sebagai anotasi di atas (luar) batang.
+        section_heading("💸 Pengeluaran per Lapak (Overhead vs HPP)")
 
         with st.expander("🔍 Debug: Kolom PENGELUARAN LAPAK", expanded=False):
             if not df_pengeluaran_raw.empty:
@@ -1544,45 +1584,122 @@ with tab2:
             else:
                 st.write("Sheet kosong atau tidak ditemukan.")
 
-        has_lokasi  = not df_pengeluaran.empty and "LOKASI LAPAK" in df_pengeluaran.columns
-        has_nominal = not df_pengeluaran.empty and "NOMINAL" in df_pengeluaran.columns
-        has_tgl     = not df_pengeluaran.empty and "Tanggal_Lengkap" in df_pengeluaran.columns
+        has_lokasi   = not df_pengeluaran.empty and "LOKASI LAPAK" in df_pengeluaran.columns
+        has_nominal  = not df_pengeluaran.empty and "NOMINAL" in df_pengeluaran.columns
+        has_kategori = not df_pengeluaran.empty and "JENIS PENGELUARAN" in df_pengeluaran.columns
 
-        if has_lokasi and has_nominal and has_tgl:
+        if has_lokasi and has_nominal:
             df_peng_plot = df_pengeluaran.copy()
-            df_peng_plot["Bulan_Label"] = df_peng_plot["Tanggal_Lengkap"].dt.to_period("M").astype(str)
             total_peng_semua = df_peng_plot["NOMINAL"].sum()
             st.markdown(
                 f'<div class="big-total">💰 Total Pengeluaran Semua Lapak: {rp(total_peng_semua)}</div>',
                 unsafe_allow_html=True
             )
-            bulanan_lokasi = df_peng_plot.groupby(["Bulan_Label", "LOKASI LAPAK"])["NOMINAL"].sum().reset_index().sort_values("Bulan_Label")
 
-            fig_peng = go.Figure()
-            colors_peng = px.colors.qualitative.Plotly
-            for i, lok in enumerate(sorted(bulanan_lokasi["LOKASI LAPAK"].unique())):
-                df_lok = bulanan_lokasi[bulanan_lokasi["LOKASI LAPAK"] == lok]
-                fig_peng.add_trace(go.Bar(
-                    name=lok, x=df_lok["Bulan_Label"], y=df_lok["NOMINAL"],
-                    text=[rp_short(v) for v in df_lok["NOMINAL"]],
-                    textposition="outside", textfont=dict(size=11),
-                    marker_color=colors_peng[i % len(colors_peng)]
+            if has_kategori:
+                def _normalize_kategori(x):
+                    if not is_filled(x):
+                        return "Tidak Berkategori"
+                    su = str(x).strip().upper()
+                    if "OVERHEAD" in su:
+                        return "Overhead"
+                    if "HPP" in su:
+                        return "HPP"
+                    return str(x).strip()
+
+                df_peng_plot["JENIS PENGELUARAN"] = df_peng_plot["JENIS PENGELUARAN"].apply(_normalize_kategori)
+
+                per_lok_kat = df_peng_plot.groupby(["LOKASI LAPAK", "JENIS PENGELUARAN"])["NOMINAL"].sum().reset_index()
+                total_per_lokasi = per_lok_kat.groupby("LOKASI LAPAK")["NOMINAL"].sum().sort_values(ascending=False)
+                urutan_lokasi = total_per_lokasi.index.tolist()
+
+                # Overhead & HPP diprioritaskan tampil duluan dengan warna tetap;
+                # kategori lain di luar itu (kalau ada) tetap ikut ditampilkan, bukan dibuang.
+                def _kategori_key(k):
+                    if k == "Overhead": return 0
+                    if k == "HPP": return 1
+                    if k == "Tidak Berkategori": return 99
+                    return 2
+                kategori_urut = sorted(per_lok_kat["JENIS PENGELUARAN"].unique().tolist(), key=_kategori_key)
+
+                palet_lain = ["#6c5ce7", "#00838f", "#8e44ad", "#2d6a4f", "#c2185b"]
+                idx_lain = 0
+                warna_kategori = {}
+                for k in kategori_urut:
+                    if k == "Overhead":
+                        warna_kategori[k] = "#ff7f0e"
+                    elif k == "HPP":
+                        warna_kategori[k] = "#d62728"
+                    elif k == "Tidak Berkategori":
+                        warna_kategori[k] = "#95a5a6"
+                    else:
+                        warna_kategori[k] = palet_lain[idx_lain % len(palet_lain)]
+                        idx_lain += 1
+
+                fig_peng = go.Figure()
+                for kat in kategori_urut:
+                    df_k = (
+                        per_lok_kat[per_lok_kat["JENIS PENGELUARAN"] == kat]
+                        .set_index("LOKASI LAPAK").reindex(urutan_lokasi)["NOMINAL"]
+                        .fillna(0).reset_index()
+                    )
+                    fig_peng.add_trace(go.Bar(
+                        name=kat,
+                        x=df_k["LOKASI LAPAK"], y=df_k["NOMINAL"],
+                        text=[rp_short(v) if v > 0 else "" for v in df_k["NOMINAL"]],
+                        textposition="inside", insidetextanchor="middle",
+                        textfont=dict(size=12, color="white"),
+                        marker_color=warna_kategori[kat]
+                    ))
+
+                max_total = total_per_lokasi.max() if not total_per_lokasi.empty else 0
+                fig_peng.update_layout(
+                    barmode="stack",
+                    title="Pengeluaran per Lapak: Overhead vs HPP",
+                    xaxis_title="Lokasi Lapak", yaxis_title="Rupiah",
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02),
+                    yaxis_tickformat=","
+                )
+                # Total per lapak ditampilkan sebagai anotasi di luar/di atas batang.
+                for lok in urutan_lokasi:
+                    fig_peng.add_annotation(
+                        x=lok, y=total_per_lokasi.loc[lok],
+                        text=f"<b>{rp_short(total_per_lokasi.loc[lok])}</b>",
+                        showarrow=False, yshift=18,
+                        font=dict(size=13, color="#1f3864")
+                    )
+                pad_yaxis(fig_peng, max_total, pad=0.3)
+                st.plotly_chart(fig_peng, use_container_width=True)
+
+                tabel_peng = per_lok_kat.pivot(index="LOKASI LAPAK", columns="JENIS PENGELUARAN", values="NOMINAL").fillna(0)
+                tabel_peng = tabel_peng.reindex(urutan_lokasi)
+                tabel_peng["Total"] = tabel_peng.sum(axis=1)
+                st.dataframe(tabel_peng.apply(lambda col: col.map(rp)), use_container_width=True)
+            else:
+                st.info(
+                    "Kolom kategori pengeluaran belum terdeteksi di sheet PENGELUARAN LAPAK. "
+                    "Tambahkan kolom berjudul **'JENIS PENGELUARAN'** (isi tiap baris dengan "
+                    "'Overhead' atau 'HPP') agar batang bisa dipecah otomatis dengan warna berbeda. "
+                    "Sementara ini ditampilkan total per lapak saja (belum dipecah kategori):"
+                )
+                per_lokasi_saja = df_peng_plot.groupby("LOKASI LAPAK")["NOMINAL"].sum().sort_values(ascending=False).reset_index()
+                fig_peng_simple = go.Figure()
+                fig_peng_simple.add_trace(go.Bar(
+                    x=per_lokasi_saja["LOKASI LAPAK"], y=per_lokasi_saja["NOMINAL"],
+                    text=[rp_short(v) for v in per_lokasi_saja["NOMINAL"]],
+                    textposition="outside", textfont=dict(size=12),
+                    marker_color="#1f77b4"
                 ))
-            pad_yaxis(fig_peng, bulanan_lokasi["NOMINAL"].max() if not bulanan_lokasi.empty else 0)
-            fig_peng.update_layout(
-                barmode="group", title="Pengeluaran Bulanan per Lapak (Bar Bersanding)",
-                xaxis_title="Bulan", yaxis_title="Rupiah",
-                legend=dict(orientation="h", yanchor="bottom", y=1.02), yaxis_tickformat=","
-            )
-            st.plotly_chart(fig_peng, use_container_width=True)
-
-            tabel_peng = bulanan_lokasi.pivot(index="Bulan_Label", columns="LOKASI LAPAK", values="NOMINAL").fillna(0)
-            st.dataframe(tabel_peng.apply(lambda col: col.map(rp)), use_container_width=True)
+                fig_peng_simple.update_layout(
+                    title="Total Pengeluaran per Lapak",
+                    xaxis_title="Lokasi Lapak", yaxis_title="Rupiah", showlegend=False
+                )
+                pad_yaxis(fig_peng_simple, per_lokasi_saja["NOMINAL"].max() if not per_lokasi_saja.empty else 0)
+                st.plotly_chart(fig_peng_simple, use_container_width=True)
         else:
             missing = []
             if not has_lokasi:  missing.append("'LOKASI LAPAK'")
             if not has_nominal: missing.append("'NOMINAL'")
-            if not has_tgl:     missing.append("'TANGGAL'")
             st.warning(f"Kolom {' dan '.join(missing)} tidak ditemukan di sheet PENGELUARAN LAPAK.")
 
         st.divider()
