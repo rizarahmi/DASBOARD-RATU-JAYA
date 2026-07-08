@@ -446,11 +446,16 @@ def load_penjualan_lapak() -> pd.DataFrame:
             return all_cols[idx]
         return None
 
-    col_omzet = _get_col_by_pos_or_name(17, ["total harga", "total_harga", "omzet", "total"])
-    col_laba  = _get_col_by_pos_or_name(18, ["keuntungan", "laba", "profit"])
-    col_jenis = _get_col_by_pos_or_name(12, ["jenis", "jenis tanaman", "nama barang", "produk", "komoditas"])
-    col_grade = _get_col_by_pos_or_name(13, ["grade", "kelas", "mutu"])
-    col_kg    = _get_col_by_pos_or_name(14, ["jumlah (kg)", "jumlah kg", "kg", "jumlah", "berat"])
+    # [CHANGE] Indeks posisi fallback digeser +1 (18/19/13/14/15, sebelumnya 17/18/12/13/14)
+    # karena 1 kolom baru ditambahkan di kolom D sheet PENJUALAN LAPAK, sehingga semua
+    # kolom yang tadinya di posisi D dst geser 1 kolom ke kanan. Pencarian berdasarkan
+    # NAMA header tetap dicoba lebih dulu (lihat _get_col_by_pos_or_name) — posisi ini
+    # hanya dipakai kalau nama headernya tidak ketemu/kosong.
+    col_omzet = _get_col_by_pos_or_name(18, ["total harga", "total_harga", "omzet", "total"])
+    col_laba  = _get_col_by_pos_or_name(19, ["keuntungan", "laba", "profit"])
+    col_jenis = _get_col_by_pos_or_name(13, ["jenis", "jenis tanaman", "nama barang", "produk", "komoditas"])
+    col_grade = _get_col_by_pos_or_name(14, ["grade", "kelas", "mutu"])
+    col_kg    = _get_col_by_pos_or_name(15, ["jumlah (kg)", "jumlah kg", "kg", "jumlah", "berat"])
 
     def _find(names):
         for n in names:
@@ -574,6 +579,30 @@ def load_pengeluaran_lapak() -> pd.DataFrame:
         if _matches:
             kategori_col = _matches[0]
             break
+
+    if kategori_col is None:
+        # [CHANGE] Fallback berbasis ISI kolom, bukan nama header: kalau tidak ada
+        # kolom yang namanya cocok daftar kandidat di atas (mis. nama kolom kategori
+        # di sheet ternyata bukan salah satu dari nama-nama itu, atau headernya kosong),
+        # cari kolom apa pun (selain NOMINAL/LOKASI LAPAK/tanggal) yang ISINYA memang
+        # berisi teks "Overhead" DAN "HPP" — supaya tetap otomatis terdeteksi walau
+        # nama headernya tidak baku.
+        _kolom_dikecualikan = {"NOMINAL", "LOKASI LAPAK", "Tanggal_Lengkap"}
+        if tgl_col:
+            _kolom_dikecualikan.add(tgl_col)
+        for c in df.columns:
+            if c in _kolom_dikecualikan:
+                continue
+            _vals = df[c].dropna().astype(str).str.strip()
+            _vals = _vals[_vals.str.len() > 0]
+            if _vals.empty:
+                continue
+            _vals_upper = _vals.str.upper()
+            _cocok = _vals_upper.str.contains("OVERHEAD") | _vals_upper.str.contains("HPP")
+            if _vals_upper.str.contains("OVERHEAD").any() and _vals_upper.str.contains("HPP").any() and _cocok.mean() >= 0.8:
+                kategori_col = c
+                break
+
     if kategori_col and kategori_col != "JENIS PENGELUARAN":
         df = df.rename(columns={kategori_col: "JENIS PENGELUARAN"})
 
@@ -1579,8 +1608,18 @@ with tab2:
 
         with st.expander("🔍 Debug: Kolom PENGELUARAN LAPAK", expanded=False):
             if not df_pengeluaran_raw.empty:
-                st.write("Kolom tersedia:", list(df_pengeluaran_raw.columns))
+                st.write("Kolom tersedia (setelah diproses):", list(df_pengeluaran_raw.columns))
                 st.dataframe(df_pengeluaran_raw.head(5))
+                if "JENIS PENGELUARAN" in df_pengeluaran_raw.columns:
+                    st.success("✅ Kolom kategori 'JENIS PENGELUARAN' terdeteksi — chart akan dipecah Overhead vs HPP.")
+                    st.write("Isi unik kolom kategori:", df_pengeluaran_raw["JENIS PENGELUARAN"].value_counts())
+                else:
+                    st.error(
+                        "❌ Kolom kategori BELUM terdeteksi. Chart di bawah akan tampil 1 warna polos "
+                        "(Overhead & HPP masih tergabung). Cek daftar kolom di atas — kalau nama kolom "
+                        "kategorimu ada di situ tapi tetap belum kedeteksi di sini, kasih tahu Claude "
+                        "nama kolom persisnya beserta 2-3 contoh isinya."
+                    )
             else:
                 st.write("Sheet kosong atau tidak ditemukan.")
 
