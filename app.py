@@ -1696,6 +1696,47 @@ with tab2:
                 )
                 pad_yaxis(fig_peng_simple, per_lokasi_saja["NOMINAL"].max() if not per_lokasi_saja.empty else 0)
                 st.plotly_chart(fig_peng_simple, use_container_width=True)
+
+            # [CHANGE] Rincian pengeluaran per baris transaksi (bukan agregat), bisa
+            # difilter per lokasi lapak — untuk lihat detail item di balik tiap batang/kategori.
+            st.divider()
+            st.markdown("#### 📋 Rincian Pengeluaran per Lokasi")
+            lokasi_semua_rincian = (
+                df_peng_plot.groupby("LOKASI LAPAK")["NOMINAL"].sum()
+                .sort_values(ascending=False).index.tolist()
+            )
+            sel_lokasi_rincian = st.multiselect(
+                "Filter Lokasi Lapak", lokasi_semua_rincian,
+                default=lokasi_semua_rincian, key="tab2_peng_rincian_lokasi"
+            )
+            if sel_lokasi_rincian:
+                df_rincian = df_peng_plot[df_peng_plot["LOKASI LAPAK"].isin(sel_lokasi_rincian)].copy()
+
+                kolom_tampil = []
+                if "Tanggal_Lengkap" in df_rincian.columns and df_rincian["Tanggal_Lengkap"].notna().any():
+                    df_rincian["Tanggal"] = df_rincian["Tanggal_Lengkap"].dt.strftime("%d/%m/%Y")
+                    kolom_tampil.append("Tanggal")
+                kolom_tampil.append("LOKASI LAPAK")
+                if "JENIS PENGELUARAN" in df_rincian.columns:
+                    kolom_tampil.append("JENIS PENGELUARAN")
+                kolom_tampil.append("NOMINAL")
+
+                # Kolom lain dari sheet asli (mis. keterangan/catatan) ikut ditampilkan;
+                # kolom tanggal mentah & Tanggal_Lengkap disembunyikan agar tak dobel dgn "Tanggal".
+                kolom_raw_tgl = [c for c in df_rincian.columns if c.strip().upper() in ["TANGGAL", "TGL", "DATE"]]
+                kolom_exclude = set(kolom_tampil) | {"Tanggal_Lengkap"} | set(kolom_raw_tgl)
+                kolom_tampil += [c for c in df_rincian.columns if c not in kolom_exclude]
+
+                sort_cols = ["LOKASI LAPAK"] + (["Tanggal_Lengkap"] if "Tanggal_Lengkap" in df_rincian.columns else [])
+                sort_asc  = [True] + ([False] if "Tanggal_Lengkap" in df_rincian.columns else [])
+                df_rincian = df_rincian.sort_values(sort_cols, ascending=sort_asc, na_position="last")
+
+                df_rincian_tampil = df_rincian[kolom_tampil].copy()
+                df_rincian_tampil["NOMINAL"] = df_rincian_tampil["NOMINAL"].map(rp)
+                st.dataframe(df_rincian_tampil, use_container_width=True, hide_index=True)
+                st.caption(f"📌 {len(df_rincian_tampil)} baris pengeluaran · Total: {rp(df_rincian['NOMINAL'].sum())}")
+            else:
+                st.info("Pilih minimal satu lokasi untuk menampilkan rincian pengeluaran.")
         else:
             missing = []
             if not has_lokasi:  missing.append("'LOKASI LAPAK'")
