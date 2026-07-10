@@ -2332,7 +2332,7 @@ with tab4:
                 nama_opts_rincian_pll = sorted(df_piutang_luar_raw[nama_col_pll].dropna().astype(str).unique())
                 sel_nama_rincian_pll = st.multiselect(
                     "Filter Nama Pelanggan", nama_opts_rincian_pll,
-                    default=[], key="tab4_piutang_luar_rincian_nama"
+                    default=nama_opts_rincian_pll, key="tab4_piutang_luar_rincian_nama"
                 )
                 if sel_nama_rincian_pll:
                     df_rincian_pll = df_piutang_luar_raw[df_piutang_luar_raw[nama_col_pll].astype(str).isin(sel_nama_rincian_pll)].copy()
