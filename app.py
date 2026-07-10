@@ -2706,31 +2706,11 @@ with tab9:
             show_hist_toggle = pc4.checkbox("Tampilkan Data Historis", value=True, key="pred_show_hist")
             show_pred_toggle = pc5.checkbox("Tampilkan Hasil Prediksi", value=True, key="pred_show_pred")
 
-            st.write("")
-            run_clicked = st.button("🚀 Jalankan Prediksi", key="pred_run_button", type="primary", use_container_width=True)
-
-        # [CHANGE] Training model (LightGBM/Prophet) TIDAK LAGI otomatis jalan setiap
-        # kali script Streamlit di-rerun. Sebelumnya, karena SEMUA isi tab Streamlit
-        # dieksekusi tiap kali app di-load/rerun (perilaku standar st.tabs() — bukan
-        # lazy per-tab, walau user belum membuka tab ini), model langsung mencoba
-        # fit() di setiap start-up, termasuk saat health check awal Streamlit Cloud.
-        # Kalau library-nya crash (mis. Segmentation fault karena versi Python di
-        # server tidak cocok dengan LightGBM/Prophet), SELURUH app ikut mati, bukan
-        # cuma tab ini. Sekarang training baru jalan kalau tombol di atas diklik;
-        # hasilnya disimpan ke session_state supaya tetap tampil walau ada interaksi
-        # lain (ganti checkbox, dsb) tanpa perlu klik ulang.
-        st.session_state.setdefault("pred_has_run", False)
-        if run_clicked:
-            st.session_state["pred_has_run"] = True
-        pred_should_run = st.session_state["pred_has_run"]
-
         future_mbg_value = 1
 
-        dfp_raw = load_data_harga_prediksi() if pred_should_run else pd.DataFrame()
+        dfp_raw = load_data_harga_prediksi()
 
-        if not pred_should_run:
-            st.info("👆 Atur parameter di atas, lalu klik **'🚀 Jalankan Prediksi'** untuk memuat data & melatih model. Model tidak lagi jalan otomatis supaya tab lain tidak ikut terganggu kalau ada masalah kompatibilitas library di server.")
-        elif dfp_raw.empty:
+        if dfp_raw.empty:
             st.info("Data harga harian belum bisa dimuat dari spreadsheet. Periksa akses spreadsheet lalu klik 🔄 Refresh Data.")
         else:
             try:
