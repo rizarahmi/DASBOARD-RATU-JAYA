@@ -2214,51 +2214,6 @@ with tab4:
 
                         st.markdown(f"**Total: {len(tabel_nama_pl)} pelanggan masih memiliki sisa piutang**")
                         st.dataframe(tabel_nama_pl[ordered_pl], use_container_width=True, hide_index=True)
-
-                # [CHANGE] Rincian piutang per baris transaksi (bukan agregat), bisa
-                # difilter berdasarkan NAMA pelanggan — untuk cari & lihat detail
-                # transaksi di balik ringkasan per nama pelanggan di atas.
-                st.divider()
-                st.markdown("#### 📋 Rincian Piutang per Nama Pelanggan")
-                nama_opts_rincian_pl = sorted(df_piutang_raw[nama_col_pl].dropna().astype(str).unique())
-                sel_nama_rincian_pl = st.multiselect(
-                    "Filter Nama Pelanggan", nama_opts_rincian_pl,
-                    default=[], key="tab4_piutang_rincian_nama"
-                )
-                if sel_nama_rincian_pl:
-                    df_rincian_pl = df_piutang_raw[df_piutang_raw[nama_col_pl].astype(str).isin(sel_nama_rincian_pl)].copy()
-
-                    kolom_tampil_pl = []
-                    if "Tanggal_Lengkap" in df_rincian_pl.columns and df_rincian_pl["Tanggal_Lengkap"].notna().any():
-                        df_rincian_pl["Tanggal"] = df_rincian_pl["Tanggal_Lengkap"].dt.strftime("%d/%m/%Y")
-                        kolom_tampil_pl.append("Tanggal")
-                    if kode_col_pl:
-                        kolom_tampil_pl.append(kode_col_pl)
-                    kolom_tampil_pl.append(nama_col_pl)
-                    for _c in ["Hutang", "Payment", "Sisa Hutang"]:
-                        if _c in df_rincian_pl.columns:
-                            kolom_tampil_pl.append(_c)
-
-                    # Kolom lain dari sheet asli (mis. keterangan/catatan) ikut ditampilkan;
-                    # kolom tanggal mentah & Tanggal_Lengkap disembunyikan agar tak dobel dgn "Tanggal".
-                    kolom_raw_tgl_pl = [c for c in df_rincian_pl.columns if c.strip().upper() in ["TANGGAL", "TGL", "DATE"]]
-                    kolom_exclude_pl = set(kolom_tampil_pl) | {"Tanggal_Lengkap"} | set(kolom_raw_tgl_pl)
-                    kolom_tampil_pl += [c for c in df_rincian_pl.columns if c not in kolom_exclude_pl and not str(c).startswith("_col_")]
-
-                    sort_cols_pl = [nama_col_pl] + (["Tanggal_Lengkap"] if "Tanggal_Lengkap" in df_rincian_pl.columns else [])
-                    sort_asc_pl  = [True] + ([False] if "Tanggal_Lengkap" in df_rincian_pl.columns else [])
-                    df_rincian_pl = df_rincian_pl.sort_values(sort_cols_pl, ascending=sort_asc_pl, na_position="last")
-
-                    df_rincian_pl_tampil = df_rincian_pl[kolom_tampil_pl].copy()
-                    for _c in ["Hutang", "Payment", "Sisa Hutang"]:
-                        if _c in df_rincian_pl_tampil.columns:
-                            df_rincian_pl_tampil[_c] = df_rincian_pl_tampil[_c].map(rp)
-                    st.dataframe(df_rincian_pl_tampil, use_container_width=True, hide_index=True)
-
-                    total_sisa_rincian_pl = df_rincian_pl["Sisa Hutang"].sum() if "Sisa Hutang" in df_rincian_pl.columns else 0
-                    st.caption(f"📌 {len(df_rincian_pl_tampil)} baris transaksi · Total Sisa Piutang: {rp(total_sisa_rincian_pl)}")
-                else:
-                    st.info("Pilih minimal satu nama pelanggan untuk menampilkan rincian transaksinya.")
             elif not nama_col_pl:
                 st.info("Kolom 'NAMA' / 'NAMA PELANGGAN' tidak ditemukan di sheet PIUTANG LAPAK, sehingga daftar per nama pelanggan tidak bisa ditampilkan.")
 
