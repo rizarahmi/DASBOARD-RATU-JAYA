@@ -2243,7 +2243,7 @@ with tab4:
                     # kolom tanggal mentah & Tanggal_Lengkap disembunyikan agar tak dobel dgn "Tanggal".
                     kolom_raw_tgl_pl = [c for c in df_rincian_pl.columns if c.strip().upper() in ["TANGGAL", "TGL", "DATE"]]
                     kolom_exclude_pl = set(kolom_tampil_pl) | {"Tanggal_Lengkap"} | set(kolom_raw_tgl_pl)
-                    kolom_tampil_pl += [c for c in df_rincian_pl.columns if c not in kolom_exclude_pl]
+                    kolom_tampil_pl += [c for c in df_rincian_pl.columns if c not in kolom_exclude_pl and not str(c).startswith("_col_")]
 
                     sort_cols_pl = [nama_col_pl] + (["Tanggal_Lengkap"] if "Tanggal_Lengkap" in df_rincian_pl.columns else [])
                     sort_asc_pl  = [True] + ([False] if "Tanggal_Lengkap" in df_rincian_pl.columns else [])
@@ -2352,7 +2352,7 @@ with tab4:
                     # & Tanggal_Lengkap disembunyikan agar tak dobel dgn "Tanggal".
                     kolom_raw_tgl_pll = [c for c in df_rincian_pll.columns if c.strip().upper() in ["TANGGAL", "TGL", "DATE"]]
                     kolom_exclude_pll = set(kolom_tampil_pll) | {"Tanggal_Lengkap"} | set(kolom_raw_tgl_pll)
-                    kolom_tampil_pll += [c for c in df_rincian_pll.columns if c not in kolom_exclude_pll]
+                    kolom_tampil_pll += [c for c in df_rincian_pll.columns if c not in kolom_exclude_pll and not str(c).startswith("_col_")]
 
                     sort_cols_pll = [nama_col_pll] + (["Tanggal_Lengkap"] if "Tanggal_Lengkap" in df_rincian_pll.columns else [])
                     sort_asc_pll  = [True] + ([False] if "Tanggal_Lengkap" in df_rincian_pll.columns else [])
