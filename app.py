@@ -9,7 +9,6 @@ import warnings
 
 warnings.filterwarnings("ignore")
 
-# --- Library prediksi (opsional; tab Prediksi tetap jalan kalau salah satu ada) ---
 try:
     from lightgbm import LGBMRegressor
     HAS_LGBM = True
@@ -22,16 +21,13 @@ try:
 except ImportError:
     HAS_PROPHET = False
 
-# ============================================================
 # KONFIGURASI HALAMAN
-# ============================================================
 st.set_page_config(
     page_title="Dashboard Ratu Jaya",
     page_icon="📊",
     layout="wide",
 )
 
-# Custom CSS
 st.markdown("""
 <style>
     .metric-card {
@@ -117,9 +113,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ============================================================
 # KONFIGURASI SUMBER DATA
-# ============================================================
 if "spreadsheet_id" not in st.secrets:
     st.error("Secret 'spreadsheet_id' belum diatur di settings/secrets.toml.")
     st.stop()
@@ -141,20 +135,16 @@ SHEET_HUTANG_PAKE_TANI = "HUTANG PAK'E TANI"
 SHEET_STOK_LAPAK      = "STOK LAPAK"
 SHEET_STOK_GUDANG     = "STOK GUDANG"
 
-# --- Spreadsheet TERPISAH khusus data Green House (bukan SPREADSHEET_ID utama) ---
 GH_SPREADSHEET_ID  = "17MhBomkR5qaLs0tOu6CO4H1pDTn1BV6_7hxOrvcVWSE"
 SHEET_GH_BAHAN     = "BAHAN"
 SHEET_GH_PEMUPUKAN = "PEMUPUKAN"
 SHEET_GH_TENAGA    = "TENAGA"
 SHEET_GH_LOKASI    = "LOKASI"
 
-# Harga tetap per KG untuk Cok AB dan Cok RUT
 HARGA_COK_AB  = 4428
 HARGA_COK_RUT = 2214
 
-# ============================================================
 # LOGIN
-# ============================================================
 def check_password() -> bool:
     def password_entered():
         if st.session_state.get("password") == st.secrets.get("app_password"):
@@ -179,9 +169,7 @@ if "app_password" not in st.secrets:
 if not check_password():
     st.stop()
 
-# ============================================================
 # HELPER FUNGSI
-# ============================================================
 def to_number(series: pd.Series) -> pd.Series:
     if pd.api.types.is_numeric_dtype(series):
         return series
@@ -222,23 +210,18 @@ def rp_short(x) -> str:
     return f"Rp {x:,.0f}"
 
 def drop_placeholder_cols(df: pd.DataFrame) -> pd.DataFrame:
-    """Buang kolom placeholder tanpa header (mis. _col_D, _col_E) dan kolom yang seluruhnya kosong."""
     if df is None or df.empty:
         return df
     out = df.copy()
-    # kolom placeholder hasil fetch_raw_csv
     drop_cols = [c for c in out.columns if str(c).startswith("_col_")]
     if drop_cols:
         out = out.drop(columns=drop_cols)
-    # buang juga kolom yang isinya kosong semua
     empty_cols = [c for c in out.columns if not out[c].apply(is_filled).any()]
     if empty_cols:
         out = out.drop(columns=empty_cols)
     return out
 
-
 def format_money_table(df: pd.DataFrame, extra_keywords=None) -> pd.DataFrame:
-    """Salin df lalu format kolom-kolom bernuansa uang menjadi format Rupiah untuk ditampilkan."""
     if df is None or df.empty:
         return df
     money_keywords = [
@@ -253,11 +236,9 @@ def format_money_table(df: pd.DataFrame, extra_keywords=None) -> pd.DataFrame:
         cu = str(c).strip().upper()
         if any(k in cu for k in money_keywords):
             num = to_number(out[c])
-            # hanya format jika kolom memang mengandung angka
             if num.notna().any():
                 out[c] = num.apply(rp)
     return out
-
 
 def hero_card(label: str, value: str, css_class: str = "hero-blue") -> str:
     return f"""<div class="hero-card {css_class}">
@@ -274,14 +255,10 @@ def pad_yaxis(fig, max_value, pad: float = 0.22):
     fig.update_traces(cliponaxis=False)
     return fig
 
-# ============================================================
-# ENGINE PREDIKSI HARGA (untuk Tab 🔮 Prediksi Harga)
-# ============================================================
-# Parameter model SUDAH DITENTUKAN (fixed) — dipilih untuk data harga
-# yang fluktuatif: responsif terhadap pergerakan tapi tidak overfit noise.
 LGB_PARAMS = dict(n_estimators=500, learning_rate=0.03, max_depth=5)
 PROPHET_PARAMS = dict(yearly_seasonality=True, weekly_seasonality=True, changepoint_prior_scale=0.15)
 
+# ENGINE PREDIKSI HARGA (tab Prediksi Harga)
 def create_time_features(df):
     df = df.copy()
     dow = df["TANGGAL"].dt.dayofweek
@@ -362,10 +339,8 @@ def run_prophet(df_known, df_future, use_mbg=False):
         "PREDIKSI": np.round(future_only["yhat"].values, 2)
     })
 
-# ============================================================
-# BACA G-SHEETS
-# ============================================================
 @st.cache_data(ttl=300, show_spinner=False)
+# BACA G-SHEETS
 def fetch_raw_csv(sheet_name: str, spreadsheet_id: str = None) -> pd.DataFrame:
     sid = spreadsheet_id or SPREADSHEET_ID
     encoded = urllib.parse.quote(sheet_name)
@@ -392,7 +367,6 @@ def fetch_raw_csv(sheet_name: str, spreadsheet_id: str = None) -> pd.DataFrame:
     df.columns = new_cols
     return df.dropna(how="all").reset_index(drop=True)
 
-
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_clean_csv(sheet_name: str) -> pd.DataFrame:
     encoded = urllib.parse.quote(sheet_name)
@@ -407,10 +381,7 @@ def fetch_clean_csv(sheet_name: str) -> pd.DataFrame:
     df = df.loc[:, ~df.columns.duplicated()]
     return df.dropna(how="all").reset_index(drop=True)
 
-
-# ============================================================
 # LOADERS
-# ============================================================
 def _parse_tanggal(df: pd.DataFrame) -> pd.DataFrame:
     cols = list(df.columns)
     if all(c in cols for c in ["Tanggal", "Bulan", "Tahun"]):
@@ -430,7 +401,6 @@ def _parse_tanggal(df: pd.DataFrame) -> pd.DataFrame:
         df["Tanggal_Lengkap"] = pd.to_datetime(df[tgl_col], dayfirst=True, errors="coerce") if tgl_col else pd.NaT
     return df
 
-
 @st.cache_data(ttl=300, show_spinner="Memuat Penjualan Lapak...")
 def load_penjualan_lapak() -> pd.DataFrame:
     df = fetch_raw_csv(SHEET_PENJUALAN)
@@ -448,11 +418,6 @@ def load_penjualan_lapak() -> pd.DataFrame:
             return all_cols[idx]
         return None
 
-    # [CHANGE] Indeks posisi fallback digeser +1 (18/19/13/14/15, sebelumnya 17/18/12/13/14)
-    # karena 1 kolom baru ditambahkan di kolom D sheet PENJUALAN LAPAK, sehingga semua
-    # kolom yang tadinya di posisi D dst geser 1 kolom ke kanan. Pencarian berdasarkan
-    # NAMA header tetap dicoba lebih dulu (lihat _get_col_by_pos_or_name) — posisi ini
-    # hanya dipakai kalau nama headernya tidak ketemu/kosong.
     col_omzet = _get_col_by_pos_or_name(18, ["total harga", "total_harga", "omzet", "total"])
     col_laba  = _get_col_by_pos_or_name(19, ["keuntungan", "laba", "profit"])
     col_jenis = _get_col_by_pos_or_name(13, ["jenis", "jenis tanaman", "nama barang", "produk", "komoditas"])
@@ -504,7 +469,6 @@ def load_penjualan_lapak() -> pd.DataFrame:
 
     return df
 
-
 @st.cache_data(ttl=300, show_spinner="Memuat Penjualan Lapak Luar...")
 def load_penjualan_lapak_luar() -> pd.DataFrame:
     df = fetch_raw_csv(SHEET_PENJUALAN_LUAR)
@@ -532,7 +496,6 @@ def load_penjualan_lapak_luar() -> pd.DataFrame:
     df["Is_Dibuang"] = df["Keterangan"].apply(is_filled) if "Keterangan" in df.columns else False
     return df
 
-
 @st.cache_data(ttl=300, show_spinner="Memuat Arus Kas...")
 def load_arus_kas() -> pd.DataFrame:
     df = fetch_clean_csv(SHEET_ARUS_KAS)
@@ -545,7 +508,6 @@ def load_arus_kas() -> pd.DataFrame:
     if "JENIS" in df.columns:
         df["JENIS"] = df["JENIS"].astype(str).str.strip().str.upper()
     return df
-
 
 @st.cache_data(ttl=300, show_spinner="Memuat Pengeluaran Lapak...")
 def load_pengeluaran_lapak() -> pd.DataFrame:
@@ -567,13 +529,6 @@ def load_pengeluaran_lapak() -> pd.DataFrame:
             df.rename(columns={lokasi_col: "LOKASI LAPAK"}, inplace=True)
         df = df[df["LOKASI LAPAK"].apply(is_filled)].reset_index(drop=True)
 
-    # [CHANGE] Kolom kategori pengeluaran (Overhead / HPP). Dua bentuk data didukung:
-    #  (A) satu kolom kategori teks (mis. "JENIS PENGELUARAN") berisi "Overhead"/"HPP",
-    #      berdampingan dengan kolom "NOMINAL" yang sudah ada — dicari lewat daftar
-    #      kandidat nama header di bawah (urutan = prioritas).
-    #  (B) dua kolom nominal terpisah bernama persis "OVERHEAD" dan "HPP" (tanpa kolom
-    #      "NOMINAL" gabungan) — otomatis digabung jadi format panjang (long format)
-    #      dengan kolom "JENIS PENGELUARAN" + "NOMINAL", supaya chart tetap jalan.
     kategori_col = None
     for _cand in ["JENIS PENGELUARAN", "KATEGORI PENGELUARAN", "TIPE PENGELUARAN",
                   "JENIS BIAYA", "KATEGORI BIAYA", "JENIS", "KATEGORI", "TIPE"]:
@@ -583,12 +538,6 @@ def load_pengeluaran_lapak() -> pd.DataFrame:
             break
 
     if kategori_col is None:
-        # [CHANGE] Fallback berbasis ISI kolom, bukan nama header: kalau tidak ada
-        # kolom yang namanya cocok daftar kandidat di atas (mis. nama kolom kategori
-        # di sheet ternyata bukan salah satu dari nama-nama itu, atau headernya kosong),
-        # cari kolom apa pun (selain NOMINAL/LOKASI LAPAK/tanggal) yang ISINYA memang
-        # berisi teks "Overhead" DAN "HPP" — supaya tetap otomatis terdeteksi walau
-        # nama headernya tidak baku.
         _kolom_dikecualikan = {"NOMINAL", "LOKASI LAPAK", "Tanggal_Lengkap"}
         if tgl_col:
             _kolom_dikecualikan.add(tgl_col)
@@ -625,7 +574,6 @@ def load_pengeluaran_lapak() -> pd.DataFrame:
 
     return df
 
-
 @st.cache_data(ttl=300, show_spinner="Memuat Ekspedisi...")
 def load_ekspedisi() -> pd.DataFrame:
     df = fetch_clean_csv(SHEET_EKSPEDISI)
@@ -641,18 +589,14 @@ def load_ekspedisi() -> pd.DataFrame:
         df = df[df[nama_col].apply(is_filled)].reset_index(drop=True)
     return df
 
-
 @st.cache_data(ttl=300, show_spinner="Memuat Piutang Lapak...")
 def load_piutang_lapak() -> pd.DataFrame:
-    # Pakai fetch_raw_csv agar posisi kolom terjaga:
-    # kolom B = NAMA pelanggan (dideteksi berdasarkan nama header dulu, fallback posisi B/index 1)
     df = fetch_raw_csv(SHEET_PIUTANG)
     if df.empty:
         return df
 
     all_cols = list(df.columns)
 
-    # KODE: cari berdasarkan nama header
     kode_col = next((c for c in all_cols if c.strip().upper() == "KODE"), None)
     if kode_col:
         if kode_col != "KODE":
@@ -660,15 +604,13 @@ def load_piutang_lapak() -> pd.DataFrame:
         df = df[df["KODE"].apply(is_filled)].reset_index(drop=True)
         all_cols = list(df.columns)
 
-    # NAMA pelanggan: cari berdasarkan nama header dulu, fallback ke KOLOM B (index 1)
     nama_col = next((c for c in all_cols if c.strip().upper() in ["NAMA", "NAMA PELANGGAN", "CUSTOMER", "PELANGGAN"]), None)
     if nama_col is None and len(all_cols) > 1:
-        nama_col = all_cols[1]  # kolom B
+        nama_col = all_cols[1]
     if nama_col and nama_col != "NAMA":
         df = df.rename(columns={nama_col: "NAMA"})
         all_cols = list(df.columns)
 
-    # Kolom uang: cari berdasarkan nama header (case-insensitive)
     hutang_col = next((c for c in all_cols if c.strip().upper() in ["HUTANG", "TOTAL HUTANG", "PIUTANG", "TOTAL PIUTANG"]), None)
     payment_col = next((c for c in all_cols if c.strip().upper() in ["PAYMENT", "BAYAR", "TERBAYAR", "PEMBAYARAN"]), None)
     sisa_col = next((c for c in all_cols if c.strip().upper() in ["SISA HUTANG", "SISA PIUTANG", "SISA", "OUTSTANDING"]), None)
@@ -687,14 +629,12 @@ def load_piutang_lapak() -> pd.DataFrame:
         if col in df.columns:
             df[col] = to_number(df[col])
 
-    # Kalau Sisa Hutang tidak ada tapi Hutang & Payment ada, hitung sendiri
     if "Sisa Hutang" not in df.columns and "Hutang" in df.columns and "Payment" in df.columns:
         df["Sisa Hutang"] = df["Hutang"].fillna(0) - df["Payment"].fillna(0)
 
     tgl_col = next((c for c in df.columns if c.strip().upper() in ["TANGGAL", "TGL", "DATE"]), None)
     df["Tanggal_Lengkap"] = pd.to_datetime(df[tgl_col], dayfirst=True, errors="coerce") if tgl_col else pd.NaT
     return df
-
 
 @st.cache_data(ttl=300, show_spinner="Memuat Piutang Lapak Luar...")
 def load_piutang_lapak_luar() -> pd.DataFrame:
@@ -711,13 +651,11 @@ def load_piutang_lapak_luar() -> pd.DataFrame:
             df = df.rename(columns={kode_col: "KODE"})
         all_cols = list(df.columns)
 
-    # Cari kolom NAMA (jika ada) agar tidak salah ambil posisi
     nama_col = next((c for c in all_cols if c.strip().upper() in ["NAMA", "NAMA PELANGGAN", "CUSTOMER", "PELANGGAN"]), None)
     if nama_col and nama_col != "NAMA":
         df = df.rename(columns={nama_col: "NAMA"})
         all_cols = list(df.columns)
 
-    # Cari kolom Hutang & Payment berdasarkan nama dulu, fallback posisi
     hutang_col = next((c for c in all_cols if c.strip().upper() in ["HUTANG", "TOTAL HUTANG", "PIUTANG", "TOTAL PIUTANG"]), None)
     payment_col = next((c for c in all_cols if c.strip().upper() in ["PAYMENT", "BAYAR", "TERBAYAR", "PEMBAYARAN"]), None)
     if hutang_col is None and len(all_cols) > 2:
@@ -746,7 +684,6 @@ def load_piutang_lapak_luar() -> pd.DataFrame:
     df["Tanggal_Lengkap"] = pd.to_datetime(df[tgl_col], dayfirst=True, errors="coerce") if tgl_col else pd.NaT
     return df
 
-
 @st.cache_data(ttl=300, show_spinner="Memuat Hutang Petani...")
 def load_hutang_petani() -> pd.DataFrame:
     df = fetch_clean_csv(SHEET_HUTANG_PETANI)
@@ -757,22 +694,19 @@ def load_hutang_petani() -> pd.DataFrame:
             df[col] = to_number(df[col])
     return df
 
-
 @st.cache_data(ttl=300, show_spinner="Memuat Kerugian Gudang...")
 def load_kerugian_gudang() -> pd.DataFrame:
-    # Sheet baru: kolom B = HUTANG, kolom C = TERBAYAR
     df = fetch_raw_csv(SHEET_KERUGIAN_GUDANG)
     if df.empty:
         return df
     all_cols = list(df.columns)
 
-    # Cari berdasarkan nama dulu, fallback ke posisi B (index 1) dan C (index 2)
     hutang_col   = next((c for c in all_cols if c.strip().upper() in ["HUTANG", "KERUGIAN", "TOTAL"]), None)
     terbayar_col = next((c for c in all_cols if c.strip().upper() in ["TERBAYAR", "PAYMENT", "BAYAR", "PEMBAYARAN"]), None)
     if hutang_col is None and len(all_cols) > 1:
-        hutang_col = all_cols[1]   # kolom B
+        hutang_col = all_cols[1]
     if terbayar_col is None and len(all_cols) > 2:
-        terbayar_col = all_cols[2] # kolom C
+        terbayar_col = all_cols[2]
 
     rename_map = {}
     if hutang_col and hutang_col != "HUTANG":
@@ -786,26 +720,22 @@ def load_kerugian_gudang() -> pd.DataFrame:
         if col in df.columns:
             df[col] = to_number(df[col])
 
-    # buang kolom kosong/placeholder (_col_D, dst.)
     df = drop_placeholder_cols(df)
     return df
 
-
 @st.cache_data(ttl=300, show_spinner="Memuat Hutang Pak'e Tani...")
 def load_hutang_pake_tani() -> pd.DataFrame:
-    # Kolom B = HUTANG, kolom C = TERBAYAR (sisa = B - C)
     df = fetch_raw_csv(SHEET_HUTANG_PAKE_TANI)
     if df.empty:
         return df
     all_cols = list(df.columns)
 
-    # Cari berdasarkan nama dulu, fallback ke posisi B (index 1) dan C (index 2)
     hutang_col   = next((c for c in all_cols if c.strip().upper() in ["HUTANG", "JUMLAH HUTANG", "TOTAL HUTANG", "PINJAMAN"]), None)
     terbayar_col = next((c for c in all_cols if c.strip().upper() in ["TERBAYAR", "PAYMENT", "BAYAR", "PEMBAYARAN", "ANGSURAN"]), None)
     if hutang_col is None and len(all_cols) > 1:
-        hutang_col = all_cols[1]   # kolom B
+        hutang_col = all_cols[1]
     if terbayar_col is None and len(all_cols) > 2:
-        terbayar_col = all_cols[2] # kolom C
+        terbayar_col = all_cols[2]
 
     rename_map = {}
     if hutang_col and hutang_col != "HUTANG":
@@ -819,20 +749,16 @@ def load_hutang_pake_tani() -> pd.DataFrame:
         if col in df.columns:
             df[col] = to_number(df[col])
 
-    # buang kolom kosong/placeholder (_col_D, dst.)
     df = drop_placeholder_cols(df)
     return df
-
 
 @st.cache_data(ttl=300, show_spinner="Memuat Data Tanaman...")
 def load_tanaman_belum_panen() -> pd.DataFrame:
     return fetch_clean_csv(SHEET_TANAMAN_BELUM)
 
-
 @st.cache_data(ttl=300, show_spinner="Memuat Data Tanaman...")
 def load_tanaman_sudah_panen() -> pd.DataFrame:
     return fetch_clean_csv(SHEET_TANAMAN_SUDAH)
-
 
 _BULAN_ID_MAP = {
     "januari": 1, "februari": 2, "maret": 3, "april": 4, "mei": 5, "juni": 6,
@@ -843,9 +769,6 @@ _BULAN_ID_MAP = {
 }
 
 def _parse_bulan_number(x):
-    """Ambil NOMOR BULAN (1-12) dari isi kolom BULAN, mis. 'Juni' -> 6, 'Juli' -> 7,
-    '7' -> 7, atau '01/07/2026' -> 7. Kolom BULAN di sheet tidak mencantumkan tahun,
-    jadi pencocokan filter dilakukan berdasarkan nomor bulan saja (bukan tanggal utuh)."""
     if pd.isna(x):
         return np.nan
     s = str(x).strip()
@@ -866,30 +789,21 @@ def _parse_bulan_number(x):
         return dt.month
     return np.nan
 
-
 @st.cache_data(ttl=300, show_spinner="Memuat Biaya Berjalan Bulanan...")
 def load_biaya_berjalan_bulanan() -> pd.DataFrame:
-    """Tabel baru di sheet TANAMAN BELUM PANEN, kolom O (index 14) & P (index 15):
-    total biaya berjalan BULANAN (bukan per mandor/baris lahan). Dibaca berdasarkan
-    posisi kolom (bukan nama header) agar tidak tertukar dengan tabel utama."""
     df = fetch_raw_csv(SHEET_TANAMAN_BELUM)
     if df.empty or len(df.columns) <= 15:
         return pd.DataFrame()
     all_cols = list(df.columns)
-    out = df[[all_cols[14], all_cols[15]]].copy()   # kolom O & P
+    out = df[[all_cols[14], all_cols[15]]].copy()
     out.columns = ["BULAN", "BIAYA BERJALAN"]
     out["BIAYA BERJALAN"] = to_number(out["BIAYA BERJALAN"])
     out = out[out["BULAN"].apply(is_filled) & out["BIAYA BERJALAN"].notna()].reset_index(drop=True)
     out["Bulan_Num"] = out["BULAN"].apply(_parse_bulan_number)
     return out
 
-
 @st.cache_data(ttl=300, show_spinner="Memuat Stok Lapak...")
 def load_stok_lapak() -> pd.DataFrame:
-    """Sheet STOK LAPAK: kolom H (index 7) = TUJUAN (kode lapak), kolom K (index 10)
-    = JENIS, kolom L (index 11) = GRADE, kolom T (index 19) = STOK LAPAK.
-    Dicari berdasarkan NAMA header dulu, fallback ke POSISI kolom kalau nama
-    headernya tidak ketemu/berbeda dari yang diharapkan."""
     df = fetch_raw_csv(SHEET_STOK_LAPAK)
     if df.empty:
         return df
@@ -933,12 +847,8 @@ def load_stok_lapak() -> pd.DataFrame:
 
     return df
 
-
 @st.cache_data(ttl=300, show_spinner="Memuat Stok Gudang...")
 def load_stok_gudang() -> pd.DataFrame:
-    """Sheet STOK GUDANG: struktur kolom sama seperti STOK LAPAK — kolom H (index 7)
-    = TUJUAN (kode gudang), kolom K (index 10) = JENIS, kolom L (index 11) = GRADE,
-    kolom T (index 19) = STOK GUDANG."""
     df = fetch_raw_csv(SHEET_STOK_GUDANG)
     if df.empty:
         return df
@@ -982,10 +892,7 @@ def load_stok_gudang() -> pd.DataFrame:
 
     return df
 
-
-# ============================================================
-# LOADERS - GREEN HOUSE (spreadsheet terpisah: GH_SPREADSHEET_ID)
-# ============================================================
+# LOADERS - GREEN HOUSE (spreadsheet terpisah)
 def _gh_find_col(all_cols, candidates):
     for cand in candidates:
         m = [c for c in all_cols if c.strip().upper() == cand.upper()]
@@ -993,14 +900,7 @@ def _gh_find_col(all_cols, candidates):
             return m[0]
     return None
 
-
 def _gh_to_number(series: pd.Series) -> pd.Series:
-    """Parser angka KHUSUS untuk sel Green House yang berformat 'Rp375,000.00'
-    (KOMA = pemisah ribuan, TITIK = desimal / gaya internasional).
-    Sengaja TIDAK pakai to_number() bawaan di atas, karena fungsi itu
-    mengasumsikan format Indonesia (titik ribuan, koma desimal) dan akan
-    salah hitung untuk data Green House (mis. 'Rp375,000.00' bisa kebaca
-    375.0 bukan 375000.0 kalau dipaksa lewat to_number())."""
     if pd.api.types.is_numeric_dtype(series):
         return series
     def parse_val(x):
@@ -1010,19 +910,14 @@ def _gh_to_number(series: pd.Series) -> pd.Series:
         if x == "" or x.lower() in ("nan", "none", "-", "rp -", "rp-"):
             return np.nan
         x = x.replace("Rp", "").replace("rp", "").strip()
-        x = x.replace(",", "")  # koma = pemisah ribuan -> buang
+        x = x.replace(",", "")
         x = "".join(ch for ch in x if ch.isdigit() or ch in ".-")
         if x in ("", "-", "."):
             return np.nan
         return x
     return pd.to_numeric(series.map(parse_val), errors="coerce")
 
-
 def _gh_normalize_rincian(df: pd.DataFrame) -> pd.DataFrame:
-    """Rapikan kolom yang dipakai bersama oleh sheet BAHAN, PEMUPUKAN, dan TENAGA:
-    Lokasi, Siklus, Nomor GH, Sub Kategori (kalau ada), dan Total. Nama header
-    dicari dulu berdasarkan teks; kalau berbeda sedikit, biarkan apa adanya
-    (tidak dipaksa rename) supaya data tidak hilang."""
     if df is None or df.empty:
         return df
     df = drop_placeholder_cols(df)
@@ -1044,8 +939,6 @@ def _gh_normalize_rincian(df: pd.DataFrame) -> pd.DataFrame:
     if rename_map:
         df = df.rename(columns=rename_map)
 
-    # Semua kolom nominal (Total, Harga, Harga/Unit, dst.) pakai parser khusus GH
-    # di atas, BUKAN to_number() generik, karena format selnya 'Rp375,000.00'.
     for c in list(df.columns):
         cu = c.strip().upper()
         if cu == "TOTAL" or "HARGA" in cu:
@@ -1058,29 +951,23 @@ def _gh_normalize_rincian(df: pd.DataFrame) -> pd.DataFrame:
 
     return df
 
-
 @st.cache_data(ttl=300, show_spinner="Memuat Data Bahan (Green House)...")
 def load_gh_bahan() -> pd.DataFrame:
     df = fetch_raw_csv(SHEET_GH_BAHAN, spreadsheet_id=GH_SPREADSHEET_ID)
     return _gh_normalize_rincian(df)
-
 
 @st.cache_data(ttl=300, show_spinner="Memuat Data Pemupukan (Green House)...")
 def load_gh_pemupukan() -> pd.DataFrame:
     df = fetch_raw_csv(SHEET_GH_PEMUPUKAN, spreadsheet_id=GH_SPREADSHEET_ID)
     return _gh_normalize_rincian(df)
 
-
 @st.cache_data(ttl=300, show_spinner="Memuat Data Tenaga (Green House)...")
 def load_gh_tenaga() -> pd.DataFrame:
     df = fetch_raw_csv(SHEET_GH_TENAGA, spreadsheet_id=GH_SPREADSHEET_ID)
     return _gh_normalize_rincian(df)
 
-
 @st.cache_data(ttl=300, show_spinner="Memuat Data Lokasi (Green House)...")
 def load_gh_lokasi() -> pd.DataFrame:
-    """Sheet LOKASI: tabel Lokasi + Jumlah GH. Nama header dicari dulu;
-    kalau tidak ketemu, fallback ke posisi kolom A = Lokasi, B = Jumlah GH."""
     df = fetch_raw_csv(SHEET_GH_LOKASI, spreadsheet_id=GH_SPREADSHEET_ID)
     if df is None or df.empty:
         return df
@@ -1110,10 +997,7 @@ def load_gh_lokasi() -> pd.DataFrame:
 
     return df
 
-
-# ============================================================
 # LOAD SEMUA DATA
-# ============================================================
 try:
     df_penjualan_raw      = load_penjualan_lapak()
     df_penjualan_luar_raw = load_penjualan_lapak_luar()
@@ -1132,8 +1016,6 @@ except Exception as e:
     st.error(f"Gagal mengambil data. Detail: {e}")
     st.stop()
 
-# Data Green House dimuat TERPISAH (spreadsheet berbeda) supaya kalau sheet ini
-# bermasalah, tab lain tetap jalan normal (tidak ikut st.stop()).
 try:
     df_gh_bahan_raw     = load_gh_bahan()
     df_gh_pemupukan_raw = load_gh_pemupukan()
@@ -1146,8 +1028,6 @@ except Exception as e:
     df_gh_tenaga_raw    = pd.DataFrame()
     df_gh_lokasi_raw    = pd.DataFrame()
 
-# Data Stok Lapak & Stok Gudang dimuat TERPISAH supaya kalau sheet ini
-# bermasalah/belum ada, tab lain (termasuk sisa Analisa Lapak) tetap jalan normal.
 try:
     df_stok_lapak_raw  = load_stok_lapak()
     df_stok_gudang_raw = load_stok_gudang()
@@ -1156,9 +1036,7 @@ except Exception as e:
     df_stok_lapak_raw  = pd.DataFrame()
     df_stok_gudang_raw = pd.DataFrame()
 
-# ============================================================
 # SIDEBAR - FILTER
-# ============================================================
 st.sidebar.title("⚙️ Filter Data")
 
 if st.sidebar.button("🔄 Refresh Data"):
@@ -1178,8 +1056,6 @@ date_range = None
 if not valid_dates.empty:
     min_d, max_d = valid_dates.min().date(), valid_dates.max().date()
 
-    # [CHANGE] Default rentang tanggal = BULAN INI (otomatis saat dashboard dibuka),
-    # tetap bisa diubah manual lewat sidebar. Dibatasi (clamp) ke rentang data yang ada.
     today = datetime.now().date()
     awal_bulan  = today.replace(day=1)
     akhir_bulan = (pd.Timestamp(today) + pd.offsets.MonthEnd(0)).date()
@@ -1187,8 +1063,6 @@ if not valid_dates.empty:
     default_start = max(min_d, awal_bulan)
     default_end   = min(max_d, akhir_bulan)
 
-    # Kalau tidak ada data di bulan ini (mis. semua data sebelum bulan berjalan),
-    # fallback ke seluruh rentang data agar dashboard tidak tampil kosong.
     if default_start > default_end:
         default_start, default_end = min_d, max_d
 
@@ -1204,9 +1078,7 @@ if st.sidebar.button("🚪 Logout"):
     st.session_state["password_correct"] = False
     st.rerun()
 
-# ============================================================
 # APLIKASI FILTER TANGGAL
-# ============================================================
 df_penjualan             = df_penjualan_raw.copy()
 df_penjualan_luar        = df_penjualan_luar_raw.copy()
 df_kas                   = df_kas_raw.copy()
@@ -1230,8 +1102,6 @@ if date_range and isinstance(date_range, tuple) and len(date_range) == 2:
     if not df_pengeluaran.empty and "Tanggal_Lengkap" in df_pengeluaran.columns:
         df_pengeluaran = df_pengeluaran[(df_pengeluaran["Tanggal_Lengkap"] >= start_ts) & (df_pengeluaran["Tanggal_Lengkap"] <= end_ts)]
     if not df_ekspedisi.empty and "Tanggal_Lengkap" in df_ekspedisi.columns:
-        # Baris dengan tanggal valid difilter sesuai rentang; baris yang tanggalnya
-        # gagal terbaca (NaT) tetap disertakan agar data ekspedisi tidak hilang.
         _mask_eks = (
             ((df_ekspedisi["Tanggal_Lengkap"] >= start_ts) & (df_ekspedisi["Tanggal_Lengkap"] <= end_ts))
             | df_ekspedisi["Tanggal_Lengkap"].isna()
@@ -1241,18 +1111,14 @@ if date_range and isinstance(date_range, tuple) and len(date_range) == 2:
         df_piutang_filtered = df_piutang_filtered[(df_piutang_filtered["Tanggal_Lengkap"] >= start_ts) & (df_piutang_filtered["Tanggal_Lengkap"] <= end_ts)]
     if not df_piutang_luar_filtered.empty and "Tanggal_Lengkap" in df_piutang_luar_filtered.columns:
         df_piutang_luar_filtered = df_piutang_luar_filtered[(df_piutang_luar_filtered["Tanggal_Lengkap"] >= start_ts) & (df_piutang_luar_filtered["Tanggal_Lengkap"] <= end_ts)]
-    # Filter tanaman sudah panen berdasarkan KOLOM TANGGAL PANEN
     def _find_tgl_panen_col(cols):
-        # 1) prioritas: kolom tanggal yang mengandung kata "PANEN"
         for c in cols:
             cu = c.strip().upper()
             if "PANEN" in cu and any(k in cu for k in ["TANGGAL", "TGL", "DATE"]):
                 return c
-        # 2) kolom yang mengandung "PANEN" saja (mis. "PANEN")
         for c in cols:
             if "PANEN" in c.strip().upper():
                 return c
-        # 3) fallback: kolom tanggal umum
         for c in cols:
             if c.strip().upper() in ["TANGGAL", "TGL", "DATE"]:
                 return c
@@ -1266,19 +1132,13 @@ if date_range and isinstance(date_range, tuple) and len(date_range) == 2:
             (df_tanaman_sudah_filtered["_tgl_parsed"] <= end_ts)
         ].drop(columns=["_tgl_parsed"])
 
-    # Filter Biaya Berjalan Bulanan berdasarkan NOMOR BULAN (kolom BULAN tidak
-    # mencantumkan tahun, mis. isinya cuma "Juni", "Juli", dst). Cocokkan dengan
-    # semua nomor bulan yang tercakup rentang tanggal filter. Baris yang bulannya
-    # gagal terbaca tetap disertakan agar biaya tidak hilang begitu saja.
     if not df_biaya_bulanan.empty and "Bulan_Num" in df_biaya_bulanan.columns:
         _bulan_periods = pd.period_range(start=start_ts, end=end_ts, freq="M")
         _bulan_terpilih = set(p.month for p in _bulan_periods)
         _mask_bb = df_biaya_bulanan["Bulan_Num"].isin(_bulan_terpilih) | df_biaya_bulanan["Bulan_Num"].isna()
         df_biaya_bulanan = df_biaya_bulanan[_mask_bb]
 
-# ============================================================
 # KALKULASI UTAMA
-# ============================================================
 omzet_lapak   = df_penjualan["Total harga"].sum() if not df_penjualan.empty and "Total harga" in df_penjualan.columns else 0
 laba_lapak    = df_penjualan["Keuntungan"].sum()  if not df_penjualan.empty and "Keuntungan"  in df_penjualan.columns else 0
 tunai_lapak   = df_penjualan["Tunai"].sum()       if not df_penjualan.empty and "Tunai"       in df_penjualan.columns else 0
@@ -1293,8 +1153,6 @@ omzet_ekspedisi = df_ekspedisi["PENDAPATAN"].sum()  if not df_ekspedisi.empty an
 biaya_ekspedisi = df_ekspedisi["PENGELUARAN"].sum() if not df_ekspedisi.empty and "PENGELUARAN" in df_ekspedisi.columns else 0
 laba_ekspedisi  = omzet_ekspedisi - biaya_ekspedisi
 
-# Omzet & Laba dari TANAMAN PANEN — mengikuti filter tanggal sidebar
-# (df_tanaman_sudah_filtered sudah difilter berdasarkan kolom Tanggal Panen)
 def _find_col_tanaman(df, keywords):
     if df is None or df.empty:
         return None
@@ -1304,8 +1162,6 @@ _omzet_col_tp = _find_col_tanaman(df_tanaman_sudah_filtered, ["omzet", "total ha
 
 omzet_tanaman = to_number(df_tanaman_sudah_filtered[_omzet_col_tp]).sum() if _omzet_col_tp else 0
 
-# [CHANGE] Laba Tanaman = Omzet − Total Biaya Berjalan Bulanan
-# (tabel baru kolom O-P sheet TANAMAN BELUM PANEN: total bulanan, bukan per mandor)
 biaya_berjalan_bulanan = (
     df_biaya_bulanan["BIAYA BERJALAN"].sum()
     if not df_biaya_bulanan.empty and "BIAYA BERJALAN" in df_biaya_bulanan.columns
@@ -1316,16 +1172,12 @@ laba_tanaman = omzet_tanaman - biaya_berjalan_bulanan
 total_omzet = omzet_lapak + omzet_lapak_luar + omzet_ekspedisi + omzet_tanaman
 total_laba  = laba_lapak + laba_lapak_luar + laba_ekspedisi + laba_tanaman
 
-# ============================================================
 # HEADER UTAMA
-# ============================================================
 st.title("📊 Dashboard Ratu Jaya")
 st.caption(f"Update Terakhir: {datetime.now().strftime('%d %B %Y, %H:%M')}")
 st.divider()
 
-# ============================================================
 # TABS
-# ============================================================
 tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11 = st.tabs([
     "💰 Pendapatan",
     "🏪 Analisa Lapak",
@@ -1340,9 +1192,7 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11 = st.tabs([
     "🌿 Green House",
 ])
 
-# ===========================================================
 # TAB 1: PENDAPATAN
-# ===========================================================
 with tab1:
     section_heading("🧮 Ringkasan Keseluruhan")
     st.markdown(
@@ -1461,17 +1311,8 @@ with tab1:
         fig_trend.update_layout(height=420, yaxis_tickformat=",")
         st.plotly_chart(fig_trend, use_container_width=True)
 
-
-# ===========================================================
 # TAB 2: ANALISA LAPAK
-# ===========================================================
 with tab2:
-    # ── STOK LAPAK & GUDANG (GABUNGAN) ─────────────────────────────────
-    # [CHANGE] Digabung jadi satu tabel/chart (Lapak + Gudang, gudang hanya
-    # GDC & GDM) dan breakdown per Lokasi (Tujuan) TIDAK lagi dipisah dari
-    # breakdown Jenis × Grade — supaya langsung kelihatan, untuk tiap
-    # lapak/gudang, sisanya ada di grade & jenis apa saja. Karena kombinasinya
-    # bisa banyak, disediakan filter Lokasi (multiselect) untuk mempersempit.
     section_heading("📦 Stok Lapak & Gudang")
     st.caption(
         "Data stok tidak mengikuti filter rentang tanggal di sidebar (sheet 'STOK LAPAK' & "
@@ -1504,7 +1345,6 @@ with tab2:
     elif not all(c in df_stok_gudang_raw.columns for c in ["TUJUAN", "STOK GUDANG"]):
         stok_warnings.append("Kolom 'TUJUAN' dan/atau 'STOK GUDANG' tidak ditemukan di sheet STOK GUDANG.")
     else:
-        # [CHANGE] Stok Gudang hanya ambil TUJUAN "GDC" dan "GDM", sisanya diabaikan.
         tmp_sg = df_stok_gudang_raw[
             df_stok_gudang_raw["TUJUAN"].apply(is_filled)
             & df_stok_gudang_raw["TUJUAN"].astype(str).str.strip().str.upper().isin(["GDC", "GDM"])
@@ -1526,11 +1366,6 @@ with tab2:
         st.info("Belum ada data stok (Lapak maupun Gudang GDC/GDM) yang bisa ditampilkan.")
     else:
         df_stok_gabungan["Stok (KG)"] = to_number(df_stok_gabungan["Stok (KG)"])
-        # [CHANGE] fillna("-") dijalankan SEBELUM astype(str): kalau urutannya dibalik,
-        # NaN asli bisa lolos tanpa terganti (tergantung versi pandas) dan baris itu
-        # akan didrop diam-diam oleh groupby di bawah (groupby membuang NaN pada kolom
-        # key secara default) — akibatnya stoknya hilang dari tabel meski tetap
-        # terhitung di Total Keseluruhan. fillna("-") dulu memastikan itu tidak terjadi.
         df_stok_gabungan["JENIS"] = df_stok_gabungan["JENIS"].fillna("-").astype(str).str.strip().replace({"": "-", "nan": "-", "None": "-"})
         df_stok_gabungan["GRADE"] = df_stok_gabungan["GRADE"].fillna("-").astype(str).str.strip().replace({"": "-", "nan": "-", "None": "-"})
 
@@ -1595,7 +1430,6 @@ with tab2:
         has_grade = GRADE_COL in df_penjualan.columns
         has_jenis = JENIS_COL in df_penjualan.columns
 
-        # ── RINGKASAN TONNASE (paling atas) ───────────────────────────────────
         if has_kg:
             df_ton_all = df_penjualan.copy()
             df_ton_all[KG_COL] = to_number(df_ton_all[KG_COL])
@@ -1617,7 +1451,6 @@ with tab2:
             st.write("Kolom tersedia:", list(df_penjualan.columns))
             st.write("Baris data:", len(df_penjualan))
 
-        # ── 1. GRADE & JENIS TERLARIS ─────────────────────────────────────────
         section_heading("🏆 Grade & Jenis Terlaris")
         col_tl1, col_tl2 = st.columns(2)
 
@@ -1657,7 +1490,6 @@ with tab2:
 
         st.divider()
 
-        # ── 2. OMZET & PROFIT PER LAPAK (+ % Margin) ─────────────────────────
         section_heading("📊 Omzet & Profit per Lapak")
         if "KODE LAPAK" in df_penjualan.columns:
             per_lapak = df_penjualan.groupby("KODE LAPAK").agg(
@@ -1723,7 +1555,6 @@ with tab2:
 
         st.divider()
 
-        # ── 3. TONNASE TERJUAL vs DIBUANG PER LAPAK (+ % Dibuang) ────────────
         section_heading("⚖️ Tonnase Terjual vs Dibuang per Lapak")
         if has_kg and "KODE LAPAK" in df_penjualan.columns and "Is_Dibuang" in df_penjualan.columns:
             df_ton_work = df_penjualan.copy()
@@ -1794,7 +1625,6 @@ with tab2:
 
         st.divider()
 
-        # ── 4. TUNAI vs KREDIT PER LAPAK ──────────────────────────────────────
         section_heading("💳 Pembayaran Tunai vs Kredit per Lapak")
         if all(c in df_penjualan.columns for c in ["KODE LAPAK", "Tunai", "Kredit"]):
             pay_grp = df_penjualan.groupby("KODE LAPAK").agg(
@@ -1825,14 +1655,6 @@ with tab2:
 
         st.divider()
 
-        # ── 5. PENGELUARAN PER LAPAK: OVERHEAD vs HPP ──────────────────────────
-        # [CHANGE] Sebelumnya dipecah per bulan (bar bersanding per LOKASI LAPAK).
-        # Sekarang disederhanakan jadi 1 batang per LOKASI LAPAK (tetap mengikuti
-        # filter tanggal sidebar, tapi dijumlah jadi satu angka per lapak untuk
-        # seluruh periode terpilih — tidak dipecah per bulan lagi), di-stack jadi
-        # 2 (atau lebih) segmen warna berdasarkan kategori "JENIS PENGELUARAN"
-        # (Overhead / HPP). Tiap segmen diberi label nominal sendiri, dan total
-        # per lapak ditampilkan sebagai anotasi di atas (luar) batang.
         section_heading("💸 Pengeluaran per Lapak (Overhead vs HPP)")
 
         with st.expander("🔍 Debug: Kolom PENGELUARAN LAPAK", expanded=False):
@@ -1881,8 +1703,6 @@ with tab2:
                 total_per_lokasi = per_lok_kat.groupby("LOKASI LAPAK")["NOMINAL"].sum().sort_values(ascending=False)
                 urutan_lokasi = total_per_lokasi.index.tolist()
 
-                # Overhead & HPP diprioritaskan tampil duluan dengan warna tetap;
-                # kategori lain di luar itu (kalau ada) tetap ikut ditampilkan, bukan dibuang.
                 def _kategori_key(k):
                     if k == "Overhead": return 0
                     if k == "HPP": return 1
@@ -1928,7 +1748,6 @@ with tab2:
                     legend=dict(orientation="h", yanchor="bottom", y=1.02),
                     yaxis_tickformat=","
                 )
-                # Total per lapak ditampilkan sebagai anotasi di luar/di atas batang.
                 for lok in urutan_lokasi:
                     fig_peng.add_annotation(
                         x=lok, y=total_per_lokasi.loc[lok],
@@ -1965,8 +1784,6 @@ with tab2:
                 pad_yaxis(fig_peng_simple, per_lokasi_saja["NOMINAL"].max() if not per_lokasi_saja.empty else 0)
                 st.plotly_chart(fig_peng_simple, use_container_width=True)
 
-            # [CHANGE] Rincian pengeluaran per baris transaksi (bukan agregat), bisa
-            # difilter per lokasi lapak — untuk lihat detail item di balik tiap batang/kategori.
             st.divider()
             st.markdown("#### 📋 Rincian Pengeluaran per Lokasi")
             lokasi_semua_rincian = (
@@ -1989,8 +1806,6 @@ with tab2:
                     kolom_tampil.append("JENIS PENGELUARAN")
                 kolom_tampil.append("NOMINAL")
 
-                # Kolom lain dari sheet asli (mis. keterangan/catatan) ikut ditampilkan;
-                # kolom tanggal mentah & Tanggal_Lengkap disembunyikan agar tak dobel dgn "Tanggal".
                 kolom_raw_tgl = [c for c in df_rincian.columns if c.strip().upper() in ["TANGGAL", "TGL", "DATE"]]
                 kolom_exclude = set(kolom_tampil) | {"Tanggal_Lengkap"} | set(kolom_raw_tgl)
                 kolom_tampil += [c for c in df_rincian.columns if c not in kolom_exclude]
@@ -2013,7 +1828,6 @@ with tab2:
 
         st.divider()
 
-        # ── 6. TONNASE BERDASARKAN GRADE ──────────────────────────────────────
         section_heading("📊 Tonnase Terjual Berdasarkan Grade")
         if has_grade and has_kg:
             df_grade_work = df_penjualan.copy()
@@ -2070,7 +1884,6 @@ with tab2:
 
         st.divider()
 
-        # ── 7. TONNASE BERDASARKAN JENIS ──────────────────────────────────────
         section_heading("📊 Tonnase Terjual Berdasarkan Jenis")
         if has_jenis and has_kg:
             df_jenis_work = df_penjualan.copy()
@@ -2128,7 +1941,6 @@ with tab2:
 
         st.divider()
 
-        # ── 8. ANALISA GABUNGAN GRADE × JENIS ────────────────────────────────
         section_heading("🔀 Analisa Gabungan Grade × Jenis")
         if has_grade and has_jenis and has_kg:
             df_gab = df_penjualan.copy()
@@ -2173,10 +1985,7 @@ with tab2:
         else:
             st.info("Kolom GRADE dan/atau JENIS tidak tersedia untuk analisa gabungan.")
 
-
-# ===========================================================
 # TAB 3: TANAMAN
-# ===========================================================
 with tab3:
     st.markdown("### 🌱 Status Lahan Tanaman")
 
@@ -2210,7 +2019,6 @@ with tab3:
     st.divider()
     tanaman_tab1, tanaman_tab2 = st.tabs(["🌾 Belum Panen", "✅ Sudah Panen"])
 
-    # ── TAB BELUM PANEN ──────────────────────────────────────────────────────
     with tanaman_tab1:
         if not df_tanaman_belum.empty:
             luas_col      = next((c for c in df_tanaman_belum.columns if "luas" in c.strip().lower()), None)
@@ -2248,10 +2056,8 @@ with tab3:
         else:
             st.info("Data sheet 'TANAMAN BELUM PANEN' kosong atau tidak ditemukan.")
 
-    # ── TAB SUDAH PANEN ──────────────────────────────────────────────────────
     with tanaman_tab2:
         if not df_tanaman_sudah.empty:
-            # [CHANGE 5] Total Omzet, Total Laba, dan Total Luas (Ha) dengan filter tanggal
             omzet_col_sudah = next((c for c in df_tanaman_sudah.columns if "omzet" in c.strip().lower() or "total harga" in c.strip().lower() or "pendapatan" in c.strip().lower()), None)
             laba_col_sudah  = next((c for c in df_tanaman_sudah.columns if "laba" in c.strip().lower() or "keuntungan" in c.strip().lower() or "profit" in c.strip().lower()), None)
             luas_col_sudah  = next((c for c in df_tanaman_sudah.columns if "luas" in c.strip().lower()), None)
@@ -2282,7 +2088,6 @@ with tab3:
             else:
                 panen_s2.info("Kolom Laba tidak ditemukan")
 
-            # [CHANGE] Total Luas Panen TIDAK mengikuti filter tanggal — selalu total keseluruhan
             if luas_col_sudah:
                 total_luas_panen = df_tanaman_sudah[luas_col_sudah].sum()
                 panen_s3.metric("🌍 Total Luas Panen", f"{total_luas_panen:,.2f} Ha")
@@ -2295,10 +2100,7 @@ with tab3:
         else:
             st.info("Data sheet 'TANAMAN PANEN' kosong atau tidak ditemukan.")
 
-
-# ===========================================================
-# TAB 4: PIUTANG (Lapak + Lapak Luar)
-# ===========================================================
+# TAB 4: PIUTANG
 with tab4:
     st.markdown("### 🧾 Piutang")
     st.caption("Sisa Hutang = total keseluruhan (tidak difilter tanggal).")
@@ -2356,7 +2158,6 @@ with tab4:
     with piutang_tab1:
         _render_piutang_tab(df_piutang_raw, df_piutang_filtered, "Pelanggan Lapak")
 
-        # [CHANGE] Daftar nama pelanggan piutang lapak — bisa difilter per lapak (KODE)
         if not df_piutang_raw.empty:
             nama_col_pl = next(
                 (c for c in df_piutang_raw.columns if c.strip().upper() in ["NAMA", "NAMA PELANGGAN", "CUSTOMER", "PELANGGAN"]),
@@ -2368,7 +2169,6 @@ with tab4:
                 st.divider()
                 st.markdown("#### 👤 Daftar Piutang per Nama Pelanggan")
 
-                # Filter per lapak (KODE)
                 if kode_col_pl:
                     lapak_opts_pl = sorted(df_piutang_raw[kode_col_pl].dropna().astype(str).unique())
                     sel_lapak_pl = st.multiselect(
@@ -2398,13 +2198,11 @@ with tab4:
                         .sort_values("Sisa_Hutang", ascending=False)
                     )
 
-                    # [CHANGE] Sembunyikan pelanggan yang sudah lunas (sisa piutang 0 atau kurang)
                     per_nama_pl = per_nama_pl[per_nama_pl["Sisa_Hutang"].fillna(0) > 0].reset_index(drop=True)
 
                     if per_nama_pl.empty:
                         st.success("🎉 Semua pelanggan pada lapak terpilih sudah lunas (sisa piutang 0).")
                     else:
-                        # Grafik sisa piutang per nama (batasi 25 teratas agar tetap terbaca)
                         top_nama_pl = per_nama_pl.head(25)
                         fig_nama_pl = go.Figure()
                         fig_nama_pl.add_trace(go.Bar(
@@ -2421,7 +2219,6 @@ with tab4:
                         pad_yaxis(fig_nama_pl, top_nama_pl["Sisa_Hutang"].max() if not top_nama_pl.empty else 0)
                         st.plotly_chart(fig_nama_pl, use_container_width=True)
 
-                        # Tabel lengkap semua nama sesuai filter lapak (yang sudah lunas disembunyikan)
                         tabel_nama_pl = per_nama_pl.copy()
                         rename_pl = {nama_col_pl: "Nama Pelanggan", "Sisa_Hutang": "Sisa Piutang"}
                         if kode_col_pl:
@@ -2449,7 +2246,6 @@ with tab4:
     with piutang_tab2:
         _render_piutang_tab(df_piutang_luar_raw, df_piutang_luar_filtered, "Lapak Luar")
 
-        # [CHANGE 3] Tabel total piutang per nama pelanggan (Lapak Luar) — perbaikan
         if not df_piutang_luar_raw.empty:
             nama_col_pll = next(
                 (c for c in df_piutang_luar_raw.columns if c.strip().upper() in ["NAMA", "NAMA PELANGGAN", "CUSTOMER", "PELANGGAN"]),
@@ -2459,7 +2255,6 @@ with tab4:
                 st.divider()
                 st.markdown("#### 👤 Total Piutang per Nama Pelanggan")
 
-                # Bangun agregasi dengan benar: jumlahkan kolom yang tersedia saja
                 agg_nama = {"Sisa_Hutang": ("Sisa Hutang", "sum")}
                 if "Hutang" in df_piutang_luar_raw.columns:
                     agg_nama["Total_Hutang"] = ("Hutang", "sum")
@@ -2473,7 +2268,6 @@ with tab4:
                     .sort_values("Sisa_Hutang", ascending=False)
                 )
 
-                # [CHANGE] Sembunyikan pelanggan yang sudah lunas (sisa piutang 0 atau kurang)
                 per_nama = per_nama[per_nama["Sisa_Hutang"].fillna(0) > 0].reset_index(drop=True)
 
                 fig_per_nama = go.Figure()
@@ -2508,9 +2302,6 @@ with tab4:
                 ordered_cols.append("Sisa Piutang")
                 st.dataframe(tabel_nama[ordered_cols], use_container_width=True, hide_index=True)
 
-                # [CHANGE] Rincian piutang per baris transaksi (bukan agregat), bisa
-                # difilter berdasarkan NAMA pelanggan — untuk cari & lihat detail
-                # transaksi Lapak Luar di balik ringkasan per nama pelanggan di atas.
                 st.divider()
                 st.markdown("#### 📋 Rincian Piutang per Nama Pelanggan (Lapak Luar)")
                 nama_opts_rincian_pll = sorted(df_piutang_luar_raw[nama_col_pll].dropna().astype(str).unique())
@@ -2532,8 +2323,6 @@ with tab4:
                         if _c in df_rincian_pll.columns:
                             kolom_tampil_pll.append(_c)
 
-                    # Kolom lain dari sheet asli ikut ditampilkan; kolom tanggal mentah
-                    # & Tanggal_Lengkap disembunyikan agar tak dobel dgn "Tanggal".
                     kolom_raw_tgl_pll = [c for c in df_rincian_pll.columns if c.strip().upper() in ["TANGGAL", "TGL", "DATE"]]
                     kolom_exclude_pll = set(kolom_tampil_pll) | {"Tanggal_Lengkap"} | set(kolom_raw_tgl_pll)
                     kolom_tampil_pll += [c for c in df_rincian_pll.columns if c not in kolom_exclude_pll and not str(c).startswith("_col_")]
@@ -2555,12 +2344,8 @@ with tab4:
             elif not nama_col_pll:
                 st.info("Kolom 'NAMA' / 'NAMA PELANGGAN' tidak ditemukan di sheet PIUTANG LAPAK LUAR.")
 
-
-# ===========================================================
-# TAB 5: HUTANG (Hutang Petani + Hutang Pak'e Tani)
-# ===========================================================
+# TAB 5: HUTANG
 def _render_hutang_section(df_raw, judul_total):
-    """Render satu seksi hutang: metrik total + tabel (kolom uang sudah Rupiah)."""
     cols_h = list(df_raw.columns)
     hutang_col  = next((c for c in cols_h if c.strip().upper() in ["HUTANG", "JUMLAH HUTANG", "TOTAL HUTANG", "PINJAMAN"]), None)
     payment_col = next((c for c in cols_h if c.strip().upper() in ["PAYMENT", "BAYAR", "TERBAYAR", "PEMBAYARAN", "ANGSURAN"]), None)
@@ -2595,14 +2380,11 @@ def _render_hutang_section(df_raw, judul_total):
 
     st.divider()
     st.markdown(f"**Total Data: {len(df_raw)} baris**")
-    # [CHANGE 1] kolom uang ditampilkan dalam format Rupiah
     st.dataframe(format_money_table(df_raw), use_container_width=True, hide_index=True)
-
 
 with tab5:
     st.markdown("### 👨‍🌾 Hutang")
 
-    # [CHANGE 2] dijadikan satu tab, lalu dipecah jadi 2 sub-tab
     hutang_tab1, hutang_tab2 = st.tabs(["👨‍🌾 Hutang Petani", "🧑‍🌾 Hutang Pak'e Tani"])
 
     with hutang_tab1:
@@ -2615,7 +2397,6 @@ with tab5:
         if df_hutang_pake_tani_raw.empty:
             st.info("Data sheet \"HUTANG PAK'E TANI\" kosong atau tidak ditemukan.")
         else:
-            # Sisa = SUM(kolom B / HUTANG) - SUM(kolom C / TERBAYAR)
             total_hutang_pt   = df_hutang_pake_tani_raw["HUTANG"].sum()   if "HUTANG"   in df_hutang_pake_tani_raw.columns else 0
             total_terbayar_pt = df_hutang_pake_tani_raw["TERBAYAR"].sum() if "TERBAYAR" in df_hutang_pake_tani_raw.columns else 0
             total_sisa_pt     = total_hutang_pt - total_terbayar_pt
@@ -2634,10 +2415,7 @@ with tab5:
             st.markdown(f"**Total Data: {len(df_hutang_pake_tani_raw)} baris**")
             st.dataframe(format_money_table(df_hutang_pake_tani_raw), use_container_width=True, hide_index=True)
 
-
-# ===========================================================
 # TAB 6: ARUS KAS
-# ===========================================================
 with tab6:
     st.markdown("### 💸 Laporan Arus Kas")
     if df_kas.empty:
@@ -2744,10 +2522,7 @@ with tab6:
             grp_display["Selisih"] = grp_jenis_kas["Selisih"].apply(rp)
             st.dataframe(grp_display, use_container_width=True, hide_index=True)
 
-
-# ===========================================================
 # TAB 7: EKSPEDISI
-# ===========================================================
 with tab7:
     st.markdown("### 🚛 Operasional Ekspedisi")
 
@@ -2766,8 +2541,6 @@ with tab7:
 
         st.divider()
 
-        # [CHANGE] Grafik ini SENGAJA pakai df_ekspedisi_raw (bukan df_ekspedisi)
-        # supaya TIDAK ikut filter tanggal sidebar — selalu tampilkan semua bulan.
         if not df_ekspedisi_raw.empty and "Tanggal_Lengkap" in df_ekspedisi_raw.columns:
             df_eks_plot = df_ekspedisi_raw.copy()
             df_eks_plot["Bulan_Label"] = df_eks_plot["Tanggal_Lengkap"].dt.to_period("M").astype(str)
@@ -2882,12 +2655,8 @@ with tab7:
             use_container_width=True, hide_index=True
         )
 
-
-# ===========================================================
 # TAB 8: KERUGIAN GUDANG
-# ===========================================================
 with tab8:
-    # Sisa kerugian terbayar = SUM(HUTANG, kolom B) - SUM(TERBAYAR, kolom C)
     st.markdown("### 🏭 Kerugian Gudang")
 
     if df_kerugian_gudang_raw.empty:
@@ -2908,14 +2677,9 @@ with tab8:
         kg3.metric("⚠️ Sisa",                    rp(sisa_kerugian_kg))
 
         st.markdown(f"**Total Data: {len(df_kerugian_gudang_raw)} baris**")
-        # [CHANGE 1] kolom uang ditampilkan dalam format Rupiah
         st.dataframe(format_money_table(df_kerugian_gudang_raw), use_container_width=True, hide_index=True)
 
-
-# ===========================================================
-# TAB 9: PREDIKSI HARGA (Analisis & Prediksi Tren Harga)
-# ===========================================================
-# Sumber data: Google Spreadsheet "harga harian"
+# TAB 9: PREDIKSI HARGA
 PRED_SPREADSHEET_ID = "1izW66Dv1H7XINUHJonwtJWNUo7BO9CjRkYU-LxEe6N0"
 
 @st.cache_data(ttl=300, show_spinner="Memuat data harga harian...")
@@ -2930,21 +2694,17 @@ def load_data_harga_prediksi() -> pd.DataFrame:
     if "TANGGAL" not in df.columns or "HARGA" not in df.columns:
         st.error("Spreadsheet harga harian harus memiliki kolom 'TANGGAL' dan 'HARGA'.")
         return pd.DataFrame()
-    # Format tanggal di sheet: M/D/YYYY (contoh 10/19/2022)
     df["TANGGAL"] = pd.to_datetime(df["TANGGAL"], format="%m/%d/%Y", errors="coerce")
     mask_nat = df["TANGGAL"].isna()
     if mask_nat.any():
-        # fallback untuk format tanggal lain
         raw = pd.read_csv(url, dtype=str)
         raw.columns = [str(c).strip().upper() for c in raw.columns]
         df.loc[mask_nat, "TANGGAL"] = pd.to_datetime(raw.loc[mask_nat, "TANGGAL"], dayfirst=False, errors="coerce")
     df = df[df["TANGGAL"].notna()].reset_index(drop=True)
-    # HARGA bisa berformat "3.300" (titik ribuan) → gunakan parser to_number
     df["HARGA"] = to_number(df["HARGA"])
     if "MBG" in df.columns:
         df["MBG"] = pd.to_numeric(df["MBG"], errors="coerce")
     return df.sort_values("TANGGAL").reset_index(drop=True)
-
 
 with tab9:
     st.markdown("### 🔮 Analisis & Prediksi Tren Harga")
@@ -2960,7 +2720,6 @@ with tab9:
         if not HAS_PROPHET:
             st.warning("Library `prophet` belum terpasang — hanya model LightGBM yang tersedia.")
 
-        # ── PENGATURAN PREDIKSI (di dalam tab, bukan sidebar) ────────────────
         with st.container(border=True):
             st.markdown('<div class="income-card-title">🎛️ Pengaturan Prediksi</div>', unsafe_allow_html=True)
 
@@ -2990,11 +2749,9 @@ with tab9:
             try:
                 dfp_raw = dfp_raw.sort_values("TANGGAL").reset_index(drop=True)
 
-                # Memisahkan data historis dengan data target prediksi masa depan
                 dfp_known = dfp_raw[dfp_raw["HARGA"].notna()].reset_index(drop=True)
                 dfp_future_input = dfp_raw[dfp_raw["HARGA"].isna()].reset_index(drop=True)
 
-                # Mekanisme sinkronisasi dengan slider durasi
                 if len(dfp_future_input) == 0:
                     st.info("💡 Tidak ada baris berisi tanggal tanpa harga di spreadsheet. Tanggal prediksi digenerate otomatis sesuai durasi di pengaturan.")
                     last_date = dfp_known["TANGGAL"].max()
@@ -3016,7 +2773,6 @@ with tab9:
                         dfp_future_input = pd.concat([dfp_future_input, dfp_extra], ignore_index=True)
                         st.warning(f"⚠️ Baris tanpa harga di spreadsheet kurang. {len(dfp_future_input) - deficit} hari diambil dari spreadsheet, {deficit} hari digenerate otomatis.")
 
-                # Validasi pengisian parameter kolom MBG
                 if use_mbg:
                     if "MBG" not in dfp_raw.columns:
                         st.error(
@@ -3031,11 +2787,9 @@ with tab9:
                     dfp_known["MBG"] = 0
                     dfp_future_input["MBG"] = 0
 
-                # Ekstraksi komponen waktu untuk visualisasi grafik analisis
                 dfp_known["TAHUN"] = dfp_known["TANGGAL"].dt.year
                 dfp_known["HARI_KE"] = dfp_known["TANGGAL"].dt.dayofyear
 
-                # Informasi Ringkas (KPI Metrics Card)
                 pm1, pm2, pm3 = st.columns(3)
                 with pm1:
                     st.metric("Total Data Historis", f"{len(dfp_known)} Hari")
@@ -3049,21 +2803,18 @@ with tab9:
                 else:
                     st.caption("ℹ️ Variabel MBG **tidak** disertakan dalam model (opsi nonaktif).")
 
-                # Eksekusi Model Terpilih (parameter sudah fixed)
                 with st.spinner("Sedang melatih model..."):
                     if "LightGBM" in chosen_model:
                         dfp_forecast = run_lightgbm(dfp_known, dfp_future_input, use_mbg)
                     else:
                         dfp_forecast = run_prophet(dfp_known, dfp_future_input, use_mbg)
 
-                # SUB-TAB INTERAKTIF
                 pred_tab_tren, pred_tab_yoy, pred_tab_data = st.tabs([
                     "📈 Grafik Tren Utama",
                     "📅 Perbandingan Tiap Tahun (YoY)",
                     "📋 Tabel Data Hasil"
                 ])
 
-                # SUB-TAB 1: GRAFIK TREN UTAMA
                 with pred_tab_tren:
                     st.subheader("Visualisasi Runtun Waktu Harga")
                     fig_main = go.Figure()
@@ -3088,15 +2839,12 @@ with tab9:
                     )
                     st.plotly_chart(fig_main, use_container_width=True)
 
-                # SUB-TAB 2: PERBANDINGAN TIAP TAHUN (YoY)
                 with pred_tab_yoy:
                     st.subheader("Analisis Musiman Berdasarkan Periode Tahunan (Overlay Tahun ke Tahun)")
 
                     dfp_yoy = dfp_known.copy()
                     dfp_yoy["TANGGAL_SINTETIS"] = pd.to_datetime(2000 * 1000 + dfp_yoy["HARI_KE"], format="%Y%j")
                     dfp_yoy["TANGGAL_LENGKAP"] = dfp_yoy["TANGGAL"].dt.strftime("%d %B %Y")
-                    # Return harian (%): perubahan harga dari hari sebelumnya, dihitung berurutan
-                    # secara kronologis (dfp_known sudah terurut berdasarkan TANGGAL)
                     dfp_yoy["RETURN"] = dfp_yoy["HARGA"].pct_change() * 100
 
                     fig_yoy = px.line(
@@ -3143,7 +2891,6 @@ with tab9:
                     )
                     st.dataframe(dfp_ret_summary, use_container_width=True, hide_index=True)
 
-                # SUB-TAB 3: TABEL DATA HASIL MURNI
                 with pred_tab_data:
                     st.subheader(f"Data Hasil Prediksi {forecast_horizon} Hari Kedepan")
                     dfp_display = dfp_forecast.copy()
@@ -3164,10 +2911,7 @@ with tab9:
             except Exception as e:
                 st.error(f"Terjadi kesalahan saat memproses data prediksi: {str(e)}")
 
-
-# ===========================================================
-# TAB 10: NET INCOME (LABA BERSIH)
-# ===========================================================
+# TAB 10: NET INCOME
 with tab10:
     st.markdown("### 🧮 Net Income (Laba Bersih)")
     st.caption(
@@ -3176,9 +2920,6 @@ with tab10:
         "dan Barang Kantor. Mengikuti filter rentang tanggal di sidebar."
     )
 
-    # ── Definisi kategori deduksi ────────────────────────────────────────────
-    # Urutan PENCOCOKAN: dari kata kunci paling spesifik ke paling umum, supaya
-    # satu nilai JENIS hanya dihitung masuk ke SATU kategori saja (tidak dobel).
     URUTAN_PENCOCOKAN = [
         ("Angsuran Mobil", ["ANGSURAN MOBIL", "CICILAN MOBIL"]),
         ("Gaji Kantor",    ["GAJI KANTOR"]),
@@ -3186,7 +2927,6 @@ with tab10:
         ("Beban",          ["BEBAN"]),
         ("Kantor",         ["KANTOR"]),
     ]
-    # Urutan TAMPIL: sesuai urutan kategori yang diminta
     URUTAN_TAMPIL = ["Kantor", "Beban", "Angsuran Mobil", "Gaji Kantor", "Barang Kantor"]
 
     ada_kas = (not df_kas_raw.empty) and ("JENIS" in df_kas_raw.columns) and ("KAS KELUAR" in df_kas_raw.columns)
@@ -3205,10 +2945,8 @@ with tab10:
         semua_jenis = []
         deteksi_otomatis = {nama: [] for nama in URUTAN_TAMPIL}
 
-    # Kategori pengeluaran dipakai langsung dari hasil deteksi otomatis (tanpa panel pengaturan)
     pilihan_kategori = deteksi_otomatis
 
-    # ── Hitung pengeluaran per kategori (mengikuti filter tanggal sidebar) ──
     if not df_kas.empty and "JENIS" in df_kas.columns and "KAS KELUAR" in df_kas.columns:
         pengeluaran_per_kategori = {
             nama: (df_kas[df_kas["JENIS"].isin(pilihan_kategori[nama])]["KAS KELUAR"].sum() if pilihan_kategori[nama] else 0.0)
@@ -3224,7 +2962,6 @@ with tab10:
     laba_bersih = total_laba - total_pengeluaran_kategori
     margin_bersih = (laba_bersih / total_omzet * 100) if total_omzet > 0 else None
 
-    # ── Hero Metrics ─────────────────────────────────────────────────────────
     kelas_hero_net = "hero-green" if laba_bersih >= 0 else "hero-red"
     st.markdown(
         '<div class="hero-row">'
@@ -3250,7 +2987,6 @@ with tab10:
     st.write("")
     st.divider()
 
-    # ── Waterfall / Bridge Chart ─────────────────────────────────────────────
     section_heading("🌊 Alur Perhitungan: Total Laba → Net Income")
 
     labels_wf   = ["Total Laba"] + URUTAN_TAMPIL + ["Net Income"]
@@ -3272,7 +3008,6 @@ with tab10:
         totals=dict(marker=dict(color="#1f3864")),
     ))
 
-    # Skala sumbu-Y manual mengikuti nilai kumulatif (termasuk kemungkinan negatif)
     running = total_laba
     running_series = [running]
     for n in URUTAN_TAMPIL:
@@ -3292,7 +3027,6 @@ with tab10:
 
     st.divider()
 
-    # ── Rincian Pengeluaran per Kategori (tabel saja) ────────────────────────
     section_heading("📊 Rincian Pengeluaran per Kategori")
     tabel_kat = pd.DataFrame({
         "Kategori": URUTAN_TAMPIL,
@@ -3305,7 +3039,6 @@ with tab10:
 
     jenis_ke_kategori = {jv: nama for nama in URUTAN_TAMPIL for jv in pilihan_kategori[nama]}
 
-    # ── Detail Transaksi ──────────────────────────────────────────────────────
     section_heading("📄 Detail Transaksi Arus Kas (Kategori Terpilih)")
     if df_kas_deduksi.empty:
         st.info("Tidak ada transaksi arus kas yang cocok dengan kategori terpilih pada periode ini.")
@@ -3329,10 +3062,7 @@ with tab10:
             key="net_income_download"
         )
 
-
-# ===========================================================
 # TAB 11: GREEN HOUSE
-# ===========================================================
 with tab11:
     st.markdown("### 🌿 Green House")
     st.caption(
@@ -3346,7 +3076,6 @@ with tab11:
         st.write("Kolom TENAGA:", list(df_gh_tenaga_raw.columns) if not df_gh_tenaga_raw.empty else "Sheet kosong/tidak ditemukan.")
         st.write("Kolom LOKASI:", list(df_gh_lokasi_raw.columns) if not df_gh_lokasi_raw.empty else "Sheet kosong/tidak ditemukan.")
 
-    # ── 1. Total Pengeluaran (gabungan BAHAN + PEMUPUKAN + TENAGA) ───────────
     total_gh_bahan       = df_gh_bahan_raw["Total"].sum()      if not df_gh_bahan_raw.empty      and "Total" in df_gh_bahan_raw.columns      else 0
     total_gh_pemupukan   = df_gh_pemupukan_raw["Total"].sum()  if not df_gh_pemupukan_raw.empty  and "Total" in df_gh_pemupukan_raw.columns  else 0
     total_gh_tenaga      = df_gh_tenaga_raw["Total"].sum()     if not df_gh_tenaga_raw.empty     and "Total" in df_gh_tenaga_raw.columns     else 0
@@ -3370,14 +3099,12 @@ with tab11:
 
     st.divider()
 
-    # ── 2. Jumlah GH per Lokasi (dari sheet LOKASI) ──────────────────────────
     section_heading("🏡 Jumlah GH per Lokasi")
 
     sumber_ket_lokasi = None
     if not df_gh_lokasi_raw.empty and "Lokasi" in df_gh_lokasi_raw.columns and "Jumlah GH" in df_gh_lokasi_raw.columns:
         tabel_gh_lokasi = df_gh_lokasi_raw[["Lokasi", "Jumlah GH"]].copy()
     else:
-        # Fallback: hitung Nomor GH unik per Lokasi dari data Bahan/Pemupukan/Tenaga
         frames_for_count = [
             d[["Lokasi", "Nomor GH"]] for d in [df_gh_bahan_raw, df_gh_pemupukan_raw, df_gh_tenaga_raw]
             if not d.empty and "Lokasi" in d.columns and "Nomor GH" in d.columns
@@ -3403,7 +3130,6 @@ with tab11:
 
     st.divider()
 
-    # ── 3 & 4. Filter Rincian Pengeluaran ─────────────────────────────────────
     section_heading("🔍 Rincian Pengeluaran Green House")
 
     kategori_opts = ["Bahan", "Pemupukan", "Tenaga"]
@@ -3433,7 +3159,6 @@ with tab11:
             key="gh_filter_subkategori"
         )
 
-    # Gabungkan sheet yang dipilih, masing-masing ditandai kolom "Kategori"
     frames = []
     if "Bahan" in sel_kategori and not df_gh_bahan_raw.empty:
         tmp = df_gh_bahan_raw.copy(); tmp["Kategori"] = "Bahan"; frames.append(tmp)
@@ -3453,8 +3178,6 @@ with tab11:
         if "Nomor GH" in df_gh_filtered.columns:
             df_gh_filtered = df_gh_filtered[df_gh_filtered["Nomor GH"].astype(str).isin(sel_nomor_gh)]
         if "Sub Kategori" in df_gh_filtered.columns and "Kategori" in df_gh_filtered.columns:
-            # Filter Sub Kategori HANYA berlaku untuk baris Kategori == "Bahan";
-            # baris Pemupukan/Tenaga (tidak punya Sub Kategori) tetap ditampilkan.
             mask_bahan = df_gh_filtered["Kategori"] == "Bahan"
             mask_keep = (~mask_bahan) | (df_gh_filtered["Sub Kategori"].astype(str).isin(sel_subkategori))
             df_gh_filtered = df_gh_filtered[mask_keep]
