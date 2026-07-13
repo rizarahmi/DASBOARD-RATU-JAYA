@@ -140,6 +140,8 @@ SHEET_GH_BAHAN     = "BAHAN"
 SHEET_GH_PEMUPUKAN = "PEMUPUKAN"
 SHEET_GH_TENAGA    = "TENAGA"
 SHEET_GH_LOKASI    = "LOKASI"
+SHEET_GH_KAS       = "GREEN HOUSE KAS"
+SHEET_GH_TANAMAN   = "GREEN HOUSE TANAMAN"
 
 HARGA_COK_AB  = 4428
 HARGA_COK_RUT = 2214
@@ -997,6 +999,41 @@ def load_gh_lokasi() -> pd.DataFrame:
 
     return df
 
+@st.cache_data(ttl=300, show_spinner="Memuat Data Tanaman (Green House)...")
+def load_gh_tanaman() -> pd.DataFrame:
+    df = fetch_raw_csv(SHEET_GH_TANAMAN, spreadsheet_id=GH_SPREADSHEET_ID)
+    return _gh_normalize_rincian(df)
+
+@st.cache_data(ttl=300, show_spinner="Memuat Kas Green House...")
+def load_gh_kas() -> pd.DataFrame:
+    df = fetch_raw_csv(SHEET_GH_KAS, spreadsheet_id=GH_SPREADSHEET_ID)
+    if df is None or df.empty:
+        return df
+    df = drop_placeholder_cols(df)
+    all_cols = list(df.columns)
+
+    kategori_col = _gh_find_col(all_cols, ["Kategori", "Kategori Kas"])
+    masuk_col    = _gh_find_col(all_cols, ["Kas Masuk", "Pemasukan", "Masuk"])
+    keluar_col   = _gh_find_col(all_cols, ["Kas Keluar", "Pengeluaran", "Keluar"])
+
+    rename_map = {}
+    for col, target in [
+        (kategori_col, "Kategori"), (masuk_col, "Kas Masuk"), (keluar_col, "Kas Keluar"),
+    ]:
+        if col and col != target:
+            rename_map[col] = target
+    if rename_map:
+        df = df.rename(columns=rename_map)
+
+    if "Kas Masuk" in df.columns:
+        df["Kas Masuk"] = _gh_to_number(df["Kas Masuk"])
+    if "Kas Keluar" in df.columns:
+        df["Kas Keluar"] = _gh_to_number(df["Kas Keluar"])
+    if "Kategori" in df.columns:
+        df["Kategori"] = df["Kategori"].astype(str).str.strip()
+
+    return df
+
 # LOAD SEMUA DATA
 try:
     df_penjualan_raw      = load_penjualan_lapak()
@@ -1021,12 +1058,16 @@ try:
     df_gh_pemupukan_raw = load_gh_pemupukan()
     df_gh_tenaga_raw    = load_gh_tenaga()
     df_gh_lokasi_raw    = load_gh_lokasi()
+    df_gh_tanaman_raw   = load_gh_tanaman()
+    df_gh_kas_raw       = load_gh_kas()
 except Exception as e:
     st.warning(f"Gagal mengambil data Green House. Detail: {e}")
     df_gh_bahan_raw     = pd.DataFrame()
     df_gh_pemupukan_raw = pd.DataFrame()
     df_gh_tenaga_raw    = pd.DataFrame()
     df_gh_lokasi_raw    = pd.DataFrame()
+    df_gh_tanaman_raw   = pd.DataFrame()
+    df_gh_kas_raw       = pd.DataFrame()
 
 try:
     df_stok_lapak_raw  = load_stok_lapak()
@@ -3071,7 +3112,8 @@ with tab10:
 with tab11:
     st.markdown("### 🌿 Green House")
     st.caption(
-        "Data diambil dari spreadsheet Green House terpisah (sheet BAHAN, PEMUPUKAN, TENAGA, LOKASI). "
+        "Data diambil dari spreadsheet Green House terpisah (sheet BAHAN, PEMUPUKAN, TENAGA, LOKASI, "
+        "GREEN HOUSE KAS, GREEN HOUSE TANAMAN). "
         "Tab ini tidak mengikuti filter rentang tanggal di sidebar — filternya sendiri di bawah."
     )
 
@@ -3080,18 +3122,35 @@ with tab11:
         st.write("Kolom PEMUPUKAN:", list(df_gh_pemupukan_raw.columns) if not df_gh_pemupukan_raw.empty else "Sheet kosong/tidak ditemukan.")
         st.write("Kolom TENAGA:", list(df_gh_tenaga_raw.columns) if not df_gh_tenaga_raw.empty else "Sheet kosong/tidak ditemukan.")
         st.write("Kolom LOKASI:", list(df_gh_lokasi_raw.columns) if not df_gh_lokasi_raw.empty else "Sheet kosong/tidak ditemukan.")
+        st.write("Kolom GREEN HOUSE TANAMAN:", list(df_gh_tanaman_raw.columns) if not df_gh_tanaman_raw.empty else "Sheet kosong/tidak ditemukan.")
+        st.write("Kolom GREEN HOUSE KAS:", list(df_gh_kas_raw.columns) if not df_gh_kas_raw.empty else "Sheet kosong/tidak ditemukan.")
 
     total_gh_bahan       = df_gh_bahan_raw["Total"].sum()      if not df_gh_bahan_raw.empty      and "Total" in df_gh_bahan_raw.columns      else 0
     total_gh_pemupukan   = df_gh_pemupukan_raw["Total"].sum()  if not df_gh_pemupukan_raw.empty  and "Total" in df_gh_pemupukan_raw.columns  else 0
     total_gh_tenaga      = df_gh_tenaga_raw["Total"].sum()     if not df_gh_tenaga_raw.empty     and "Total" in df_gh_tenaga_raw.columns     else 0
-    total_gh_keseluruhan = total_gh_bahan + total_gh_pemupukan + total_gh_tenaga
+    total_gh_tanaman     = df_gh_tanaman_raw["Total"].sum()    if not df_gh_tanaman_raw.empty    and "Total" in df_gh_tanaman_raw.columns    else 0
+
+    if not df_gh_kas_raw.empty and "Kategori" in df_gh_kas_raw.columns and "Kas Keluar" in df_gh_kas_raw.columns:
+        mask_bangunan_gh = df_gh_kas_raw["Kategori"].astype(str).str.strip().str.lower() == "bangunan"
+        biaya_bangunan_gh = df_gh_kas_raw.loc[mask_bangunan_gh, "Kas Keluar"].sum()
+    else:
+        biaya_bangunan_gh = 0
+
+    total_biaya_berjalan_gh = biaya_bangunan_gh + total_gh_tanaman
+
+    kas_masuk_gh_total  = df_gh_kas_raw["Kas Masuk"].sum()  if not df_gh_kas_raw.empty and "Kas Masuk"  in df_gh_kas_raw.columns else 0
+    kas_keluar_gh_total = df_gh_kas_raw["Kas Keluar"].sum() if not df_gh_kas_raw.empty and "Kas Keluar" in df_gh_kas_raw.columns else 0
+    saldo_kas_gh        = kas_masuk_gh_total - kas_keluar_gh_total
+    kelas_hero_kas_gh   = "hero-green" if saldo_kas_gh >= 0 else "hero-red"
 
     st.markdown(
         '<div class="hero-row">'
-        + hero_card("🌿 Total Pengeluaran Green House", rp(total_gh_keseluruhan), "hero-blue")
+        + hero_card("🌿 Total Biaya Berjalan", rp(total_biaya_berjalan_gh), "hero-blue")
+        + hero_card("💰 Kas Green House", rp(saldo_kas_gh), kelas_hero_kas_gh)
         + '</div>',
         unsafe_allow_html=True
     )
+    st.caption("Biaya Berjalan = Kas Keluar (kategori Bangunan) di sheet GREEN HOUSE KAS + Total pengeluaran di sheet GREEN HOUSE TANAMAN. Kas Green House = Kas Masuk − Kas Keluar (seluruh kategori) di sheet GREEN HOUSE KAS.")
     st.write("")
 
     with st.container(border=True):
@@ -3200,3 +3259,34 @@ with tab11:
         df_gh_display = df_gh_filtered[cols_priority + cols_rest].dropna(axis=1, how="all")
         st.markdown(f"**Total Baris: {len(df_gh_filtered)}**")
         st.dataframe(format_money_table(df_gh_display), use_container_width=True, hide_index=True)
+
+    st.divider()
+    section_heading("💸 Rincian Kas Green House")
+
+    if df_gh_kas_raw.empty:
+        st.info("Data Kas Green House (sheet GREEN HOUSE KAS) kosong atau tidak ditemukan.")
+    else:
+        rk1, rk2, rk3 = st.columns(3)
+        rk1.metric("🟩 Total Kas Masuk", rp(kas_masuk_gh_total))
+        rk2.metric("🟥 Total Kas Keluar", rp(kas_keluar_gh_total))
+        rk3.metric("💰 Saldo Kas", rp(saldo_kas_gh))
+
+        if "Kategori" in df_gh_kas_raw.columns:
+            st.markdown("**📊 Ringkasan per Kategori**")
+            ringkasan_kategori_gh = df_gh_kas_raw.groupby("Kategori").agg(
+                Masuk=("Kas Masuk", "sum"), Keluar=("Kas Keluar", "sum")
+            ).reset_index()
+            ringkasan_kategori_gh["Selisih"] = ringkasan_kategori_gh["Masuk"] - ringkasan_kategori_gh["Keluar"]
+            ringkasan_kategori_gh = ringkasan_kategori_gh.sort_values("Selisih", ascending=False).rename(
+                columns={"Masuk": "Kas Masuk", "Keluar": "Kas Keluar"}
+            )
+            ringkasan_display_gh = ringkasan_kategori_gh.copy()
+            for c in ["Kas Masuk", "Kas Keluar", "Selisih"]:
+                ringkasan_display_gh[c] = ringkasan_display_gh[c].apply(rp)
+            st.dataframe(ringkasan_display_gh, use_container_width=True, hide_index=True)
+
+        st.markdown("**🔍 Rincian Transaksi**")
+        st.dataframe(
+            format_money_table(df_gh_kas_raw, extra_keywords=["KAS", "MASUK", "KELUAR"]),
+            use_container_width=True, hide_index=True
+        )
