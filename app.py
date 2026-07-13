@@ -951,6 +951,8 @@ def _gh_normalize_rincian(df: pd.DataFrame) -> pd.DataFrame:
     if "Lokasi" in df.columns:
         df = df[df["Lokasi"].apply(is_filled)].reset_index(drop=True)
 
+    df = _parse_tanggal(df)
+
     return df
 
 @st.cache_data(ttl=300, show_spinner="Memuat Data Bahan (Green House)...")
@@ -1031,6 +1033,8 @@ def load_gh_kas() -> pd.DataFrame:
         df["Kas Keluar"] = _gh_to_number(df["Kas Keluar"])
     if "Kategori" in df.columns:
         df["Kategori"] = df["Kategori"].astype(str).str.strip()
+
+    df = _parse_tanggal(df)
 
     return df
 
@@ -1129,6 +1133,8 @@ df_piutang_filtered      = df_piutang_raw.copy()
 df_piutang_luar_filtered = df_piutang_luar_raw.copy()
 df_tanaman_sudah_filtered = df_tanaman_sudah.copy()
 df_biaya_bulanan         = df_biaya_bulanan_raw.copy()
+df_gh_kas_biaya          = df_gh_kas_raw.copy()
+df_gh_tanaman_biaya      = df_gh_tanaman_raw.copy()
 
 if date_range and isinstance(date_range, tuple) and len(date_range) == 2:
     start_ts = pd.Timestamp(date_range[0])
@@ -1152,6 +1158,10 @@ if date_range and isinstance(date_range, tuple) and len(date_range) == 2:
         df_piutang_filtered = df_piutang_filtered[(df_piutang_filtered["Tanggal_Lengkap"] >= start_ts) & (df_piutang_filtered["Tanggal_Lengkap"] <= end_ts)]
     if not df_piutang_luar_filtered.empty and "Tanggal_Lengkap" in df_piutang_luar_filtered.columns:
         df_piutang_luar_filtered = df_piutang_luar_filtered[(df_piutang_luar_filtered["Tanggal_Lengkap"] >= start_ts) & (df_piutang_luar_filtered["Tanggal_Lengkap"] <= end_ts)]
+    if not df_gh_kas_biaya.empty and "Tanggal_Lengkap" in df_gh_kas_biaya.columns:
+        df_gh_kas_biaya = df_gh_kas_biaya[(df_gh_kas_biaya["Tanggal_Lengkap"] >= start_ts) & (df_gh_kas_biaya["Tanggal_Lengkap"] <= end_ts)]
+    if not df_gh_tanaman_biaya.empty and "Tanggal_Lengkap" in df_gh_tanaman_biaya.columns:
+        df_gh_tanaman_biaya = df_gh_tanaman_biaya[(df_gh_tanaman_biaya["Tanggal_Lengkap"] >= start_ts) & (df_gh_tanaman_biaya["Tanggal_Lengkap"] <= end_ts)]
     def _find_tgl_panen_col(cols):
         for c in cols:
             cu = c.strip().upper()
@@ -1493,10 +1503,6 @@ with tab2:
             ton3.metric("📦 Total Tonnase Keseluruhan", f"{total_kg_semua:,.1f} KG")
             st.divider()
 
-        with st.expander("🔍 Debug: Kolom PENJUALAN LAPAK", expanded=False):
-            st.write("Kolom tersedia:", list(df_penjualan.columns))
-            st.write("Baris data:", len(df_penjualan))
-
         section_heading("🏆 Grade & Jenis Terlaris")
         col_tl1, col_tl2 = st.columns(2)
 
@@ -1702,23 +1708,6 @@ with tab2:
         st.divider()
 
         section_heading("💸 Pengeluaran per Lapak (Overhead vs HPP)")
-
-        with st.expander("🔍 Debug: Kolom PENGELUARAN LAPAK", expanded=False):
-            if not df_pengeluaran_raw.empty:
-                st.write("Kolom tersedia (setelah diproses):", list(df_pengeluaran_raw.columns))
-                st.dataframe(df_pengeluaran_raw.head(5))
-                if "JENIS PENGELUARAN" in df_pengeluaran_raw.columns:
-                    st.success("✅ Kolom kategori 'JENIS PENGELUARAN' terdeteksi — chart akan dipecah Overhead vs HPP.")
-                    st.write("Isi unik kolom kategori:", df_pengeluaran_raw["JENIS PENGELUARAN"].value_counts())
-                else:
-                    st.error(
-                        "❌ Kolom kategori BELUM terdeteksi. Chart di bawah akan tampil 1 warna polos "
-                        "(Overhead & HPP masih tergabung). Cek daftar kolom di atas — kalau nama kolom "
-                        "kategorimu ada di situ tapi tetap belum kedeteksi di sini, kasih tahu Claude "
-                        "nama kolom persisnya beserta 2-3 contoh isinya."
-                    )
-            else:
-                st.write("Sheet kosong atau tidak ditemukan.")
 
         has_lokasi   = not df_pengeluaran.empty and "LOKASI LAPAK" in df_pengeluaran.columns
         has_nominal  = not df_pengeluaran.empty and "NOMINAL" in df_pengeluaran.columns
@@ -2057,10 +2046,6 @@ with tab3:
     m1.metric("💰 Total Biaya Berjalan", rp(total_biaya_berjalan))
     m2.metric("🌿 Cok AB per KG",        f"Rp {HARGA_COK_AB:,}/KG")
     m3.metric("🌾 Cok RUT per KG",       f"Rp {HARGA_COK_RUT:,}/KG")
-
-    with st.expander("🔍 Debug: Kolom TANAMAN", expanded=False):
-        st.write("Kolom 'TANAMAN BELUM PANEN':", list(df_tanaman_belum.columns) if not df_tanaman_belum.empty else "Sheet kosong.")
-        st.write("Kolom 'TANAMAN PANEN':",       list(df_tanaman_sudah.columns) if not df_tanaman_sudah.empty else "Sheet kosong.")
 
     st.divider()
     tanaman_tab1, tanaman_tab2 = st.tabs(["🌾 Belum Panen", "✅ Sudah Panen"])
@@ -3111,32 +3096,19 @@ with tab10:
 # TAB 11: GREEN HOUSE
 with tab11:
     st.markdown("### 🌿 Green House")
-    st.caption(
-        "Data diambil dari spreadsheet Green House terpisah (sheet BAHAN, PEMUPUKAN, TENAGA, LOKASI, "
-        "GREEN HOUSE KAS, GREEN HOUSE TANAMAN). "
-        "Tab ini tidak mengikuti filter rentang tanggal di sidebar — filternya sendiri di bawah."
-    )
-
-    with st.expander("🔍 Debug: Kolom Sheet Green House", expanded=False):
-        st.write("Kolom BAHAN:", list(df_gh_bahan_raw.columns) if not df_gh_bahan_raw.empty else "Sheet kosong/tidak ditemukan.")
-        st.write("Kolom PEMUPUKAN:", list(df_gh_pemupukan_raw.columns) if not df_gh_pemupukan_raw.empty else "Sheet kosong/tidak ditemukan.")
-        st.write("Kolom TENAGA:", list(df_gh_tenaga_raw.columns) if not df_gh_tenaga_raw.empty else "Sheet kosong/tidak ditemukan.")
-        st.write("Kolom LOKASI:", list(df_gh_lokasi_raw.columns) if not df_gh_lokasi_raw.empty else "Sheet kosong/tidak ditemukan.")
-        st.write("Kolom GREEN HOUSE TANAMAN:", list(df_gh_tanaman_raw.columns) if not df_gh_tanaman_raw.empty else "Sheet kosong/tidak ditemukan.")
-        st.write("Kolom GREEN HOUSE KAS:", list(df_gh_kas_raw.columns) if not df_gh_kas_raw.empty else "Sheet kosong/tidak ditemukan.")
 
     total_gh_bahan       = df_gh_bahan_raw["Total"].sum()      if not df_gh_bahan_raw.empty      and "Total" in df_gh_bahan_raw.columns      else 0
     total_gh_pemupukan   = df_gh_pemupukan_raw["Total"].sum()  if not df_gh_pemupukan_raw.empty  and "Total" in df_gh_pemupukan_raw.columns  else 0
     total_gh_tenaga      = df_gh_tenaga_raw["Total"].sum()     if not df_gh_tenaga_raw.empty     and "Total" in df_gh_tenaga_raw.columns     else 0
-    total_gh_tanaman     = df_gh_tanaman_raw["Total"].sum()    if not df_gh_tanaman_raw.empty    and "Total" in df_gh_tanaman_raw.columns    else 0
+    total_gh_tanaman_biaya = df_gh_tanaman_biaya["Total"].sum() if not df_gh_tanaman_biaya.empty  and "Total" in df_gh_tanaman_biaya.columns  else 0
 
-    if not df_gh_kas_raw.empty and "Kategori" in df_gh_kas_raw.columns and "Kas Keluar" in df_gh_kas_raw.columns:
-        mask_bangunan_gh = df_gh_kas_raw["Kategori"].astype(str).str.strip().str.lower() == "bangunan"
-        biaya_bangunan_gh = df_gh_kas_raw.loc[mask_bangunan_gh, "Kas Keluar"].sum()
+    if not df_gh_kas_biaya.empty and "Kategori" in df_gh_kas_biaya.columns and "Kas Keluar" in df_gh_kas_biaya.columns:
+        mask_bangunan_gh = df_gh_kas_biaya["Kategori"].astype(str).str.strip().str.lower() == "bangunan"
+        biaya_bangunan_gh = df_gh_kas_biaya.loc[mask_bangunan_gh, "Kas Keluar"].sum()
     else:
         biaya_bangunan_gh = 0
 
-    total_biaya_berjalan_gh = biaya_bangunan_gh + total_gh_tanaman
+    total_biaya_berjalan_gh = biaya_bangunan_gh + total_gh_tanaman_biaya
 
     kas_masuk_gh_total  = df_gh_kas_raw["Kas Masuk"].sum()  if not df_gh_kas_raw.empty and "Kas Masuk"  in df_gh_kas_raw.columns else 0
     kas_keluar_gh_total = df_gh_kas_raw["Kas Keluar"].sum() if not df_gh_kas_raw.empty and "Kas Keluar" in df_gh_kas_raw.columns else 0
@@ -3150,7 +3122,6 @@ with tab11:
         + '</div>',
         unsafe_allow_html=True
     )
-    st.caption("Biaya Berjalan = Kas Keluar (kategori Bangunan) di sheet GREEN HOUSE KAS + Total pengeluaran di sheet GREEN HOUSE TANAMAN. Kas Green House = Kas Masuk − Kas Keluar (seluruh kategori) di sheet GREEN HOUSE KAS.")
     st.write("")
 
     with st.container(border=True):
@@ -3159,7 +3130,6 @@ with tab11:
         gc1.metric("Bahan", rp(total_gh_bahan))
         gc2.metric("Pemupukan", rp(total_gh_pemupukan))
         gc3.metric("Tenaga", rp(total_gh_tenaga))
-        st.caption("Total = jumlah kolom 'Total' pada masing-masing sheet BAHAN, PEMUPUKAN, dan TENAGA.")
 
     st.divider()
 
@@ -3287,6 +3257,6 @@ with tab11:
 
         st.markdown("**🔍 Rincian Transaksi**")
         st.dataframe(
-            format_money_table(df_gh_kas_raw, extra_keywords=["KAS", "MASUK", "KELUAR"]),
+            format_money_table(df_gh_kas_raw.drop(columns=["Tanggal_Lengkap"], errors="ignore"), extra_keywords=["KAS", "MASUK", "KELUAR"]),
             use_container_width=True, hide_index=True
         )
