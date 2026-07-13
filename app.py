@@ -1314,14 +1314,6 @@ with tab1:
 # TAB 2: ANALISA LAPAK
 with tab2:
     section_heading("📦 Stok Lapak & Gudang")
-    st.caption(
-        "Data stok tidak mengikuti filter rentang tanggal di sidebar (sheet 'STOK LAPAK' & "
-        "'STOK GUDANG' tidak memiliki kolom tanggal). Gudang yang ditampilkan hanya **GDC** dan **GDM**."
-    )
-
-    with st.expander("🔍 Debug: Kolom STOK LAPAK / STOK GUDANG", expanded=False):
-        st.write("Kolom STOK LAPAK (setelah diproses):", list(df_stok_lapak_raw.columns) if not df_stok_lapak_raw.empty else "Sheet kosong/tidak ditemukan.")
-        st.write("Kolom STOK GUDANG (setelah diproses):", list(df_stok_gudang_raw.columns) if not df_stok_gudang_raw.empty else "Sheet kosong/tidak ditemukan.")
 
     frames_stok = []
     stok_warnings = []
@@ -1336,9 +1328,7 @@ with tab2:
         tmp_sl["Stok (KG)"] = tmp_sl["STOK LAPAK"]
         if "JENIS" not in tmp_sl.columns:
             tmp_sl["JENIS"] = "-"
-        if "GRADE" not in tmp_sl.columns:
-            tmp_sl["GRADE"] = "-"
-        frames_stok.append(tmp_sl[["Tipe", "TUJUAN", "JENIS", "GRADE", "Stok (KG)"]])
+        frames_stok.append(tmp_sl[["Tipe", "TUJUAN", "JENIS", "Stok (KG)"]])
 
     if df_stok_gudang_raw.empty:
         stok_warnings.append("Sheet 'STOK GUDANG' kosong atau tidak ditemukan.")
@@ -1353,9 +1343,7 @@ with tab2:
         tmp_sg["Stok (KG)"] = tmp_sg["STOK GUDANG"]
         if "JENIS" not in tmp_sg.columns:
             tmp_sg["JENIS"] = "-"
-        if "GRADE" not in tmp_sg.columns:
-            tmp_sg["GRADE"] = "-"
-        frames_stok.append(tmp_sg[["Tipe", "TUJUAN", "JENIS", "GRADE", "Stok (KG)"]])
+        frames_stok.append(tmp_sg[["Tipe", "TUJUAN", "JENIS", "Stok (KG)"]])
 
     for _msg in stok_warnings:
         st.warning(_msg)
@@ -1367,10 +1355,9 @@ with tab2:
     else:
         df_stok_gabungan["Stok (KG)"] = to_number(df_stok_gabungan["Stok (KG)"])
         df_stok_gabungan["JENIS"] = df_stok_gabungan["JENIS"].fillna("-").astype(str).str.strip().replace({"": "-", "nan": "-", "None": "-"})
-        df_stok_gabungan["GRADE"] = df_stok_gabungan["GRADE"].fillna("-").astype(str).str.strip().replace({"": "-", "nan": "-", "None": "-"})
 
         st.markdown(
-            f'<div class="big-total">📦 Total Stok Keseluruhan (Lapak + Gudang GDC/GDM): '
+            f'<div class="big-total">📦 Total Stok Keseluruhan: '
             f'{df_stok_gabungan["Stok (KG)"].sum():,.1f} KG</div>',
             unsafe_allow_html=True
         )
@@ -1386,34 +1373,52 @@ with tab2:
         else:
             df_stok_filtered = df_stok_gabungan[df_stok_gabungan["TUJUAN"].astype(str).isin(sel_lokasi_stok)].copy()
 
-            per_lok_jg = (
-                df_stok_filtered.groupby(["Tipe", "TUJUAN", "JENIS", "GRADE"])["Stok (KG)"]
+            per_lok_jenis = (
+                df_stok_filtered.groupby(["Tipe", "TUJUAN", "JENIS"])["Stok (KG)"]
                 .sum().reset_index()
             )
-            per_lok_jg["Jenis - Grade"] = per_lok_jg["JENIS"] + " - " + per_lok_jg["GRADE"]
 
-            urutan_lokasi_stok = (
-                per_lok_jg.groupby("TUJUAN")["Stok (KG)"].sum()
-                .sort_values(ascending=False).index.tolist()
+            total_per_lokasi = (
+                per_lok_jenis.groupby("TUJUAN")["Stok (KG)"].sum()
+                .sort_values(ascending=False)
             )
+            urutan_lokasi_stok = total_per_lokasi.index.tolist()
 
-            st.metric("Total Stok (Lokasi Terpilih)", f"{per_lok_jg['Stok (KG)'].sum():,.1f} KG")
+            st.metric("Total Stok (Lokasi Terpilih)", f"{per_lok_jenis['Stok (KG)'].sum():,.1f} KG")
+
+            st.markdown("**📍 Total Stok per Lapak/Gudang**")
+            tabel_total_lokasi = (
+                per_lok_jenis.groupby(["Tipe", "TUJUAN"])["Stok (KG)"].sum()
+                .reset_index()
+                .sort_values("Stok (KG)", ascending=False)
+                .rename(columns={"TUJUAN": "Lokasi"})
+            )
+            tabel_total_lokasi["Stok (KG)"] = tabel_total_lokasi["Stok (KG)"].apply(lambda x: f"{x:,.1f} KG")
+            st.dataframe(tabel_total_lokasi, use_container_width=True, hide_index=True)
 
             fig_stok_gab = px.bar(
-                per_lok_jg, x="TUJUAN", y="Stok (KG)", color="Jenis - Grade",
+                per_lok_jenis, x="TUJUAN", y="Stok (KG)", color="JENIS",
                 barmode="stack",
                 category_orders={"TUJUAN": urutan_lokasi_stok},
-                title="Stok per Lokasi (Lapak/Gudang), dipecah Jenis × Grade",
+                title="Stok per Lokasi (Lapak/Gudang), dipecah Jenis",
                 labels={"TUJUAN": "Lokasi (Lapak/Gudang)"}
             )
             fig_stok_gab.update_layout(
                 legend=dict(orientation="h", yanchor="bottom", y=1.02),
                 height=520, xaxis_tickangle=-30
             )
+            for lok in urutan_lokasi_stok:
+                fig_stok_gab.add_annotation(
+                    x=lok, y=total_per_lokasi.loc[lok],
+                    text=f"<b>{total_per_lokasi.loc[lok]:,.1f} KG</b>",
+                    showarrow=False, yshift=14,
+                    font=dict(size=12, color="#1f3864")
+                )
+            pad_yaxis(fig_stok_gab, total_per_lokasi.max() if not total_per_lokasi.empty else 0, pad=0.3)
             st.plotly_chart(fig_stok_gab, use_container_width=True)
 
-            tabel_stok_gab = per_lok_jg.sort_values(["TUJUAN", "Stok (KG)"], ascending=[True, False]).copy()
-            tabel_stok_gab = tabel_stok_gab[["Tipe", "TUJUAN", "JENIS", "GRADE", "Stok (KG)"]].rename(columns={"TUJUAN": "Lokasi"})
+            tabel_stok_gab = per_lok_jenis.sort_values(["TUJUAN", "Stok (KG)"], ascending=[True, False]).copy()
+            tabel_stok_gab = tabel_stok_gab[["Tipe", "TUJUAN", "JENIS", "Stok (KG)"]].rename(columns={"TUJUAN": "Lokasi"})
             tabel_stok_gab["Stok (KG)"] = tabel_stok_gab["Stok (KG)"].apply(lambda x: f"{x:,.1f} KG")
             st.dataframe(tabel_stok_gab, use_container_width=True, hide_index=True)
 
