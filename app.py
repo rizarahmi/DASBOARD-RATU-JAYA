@@ -1004,7 +1004,32 @@ def load_gh_lokasi() -> pd.DataFrame:
 @st.cache_data(ttl=300, show_spinner="Memuat Data Tanaman (Green House)...")
 def load_gh_tanaman() -> pd.DataFrame:
     df = fetch_raw_csv(SHEET_GH_TANAMAN, spreadsheet_id=GH_SPREADSHEET_ID)
-    return _gh_normalize_rincian(df)
+    if df is None or df.empty:
+        return df
+    df = drop_placeholder_cols(df)
+    all_cols = list(df.columns)
+
+    masuk_col  = _gh_find_col(all_cols, ["Kas Masuk", "Pemasukan", "Masuk"])
+    keluar_col = _gh_find_col(all_cols, ["Kas Keluar", "Pengeluaran", "Keluar"])
+    ket_col    = _gh_find_col(all_cols, ["Keterangan", "Ket"])
+
+    rename_map = {}
+    for col, target in [
+        (masuk_col, "Kas Masuk"), (keluar_col, "Kas Keluar"), (ket_col, "Keterangan"),
+    ]:
+        if col and col != target:
+            rename_map[col] = target
+    if rename_map:
+        df = df.rename(columns=rename_map)
+
+    if "Kas Masuk" in df.columns:
+        df["Kas Masuk"] = _gh_to_number(df["Kas Masuk"])
+    if "Kas Keluar" in df.columns:
+        df["Kas Keluar"] = _gh_to_number(df["Kas Keluar"])
+
+    df = _parse_tanggal(df)
+
+    return df
 
 @st.cache_data(ttl=300, show_spinner="Memuat Kas Green House...")
 def load_gh_kas() -> pd.DataFrame:
@@ -3108,7 +3133,7 @@ with tab11:
     total_gh_bahan       = df_gh_bahan_raw["Total"].sum()      if not df_gh_bahan_raw.empty      and "Total" in df_gh_bahan_raw.columns      else 0
     total_gh_pemupukan   = df_gh_pemupukan_raw["Total"].sum()  if not df_gh_pemupukan_raw.empty  and "Total" in df_gh_pemupukan_raw.columns  else 0
     total_gh_tenaga      = df_gh_tenaga_raw["Total"].sum()     if not df_gh_tenaga_raw.empty     and "Total" in df_gh_tenaga_raw.columns     else 0
-    total_gh_tanaman_biaya = df_gh_tanaman_biaya["Total"].sum() if not df_gh_tanaman_biaya.empty  and "Total" in df_gh_tanaman_biaya.columns  else 0
+    total_gh_tanaman_biaya = df_gh_tanaman_biaya["Kas Keluar"].sum() if not df_gh_tanaman_biaya.empty and "Kas Keluar" in df_gh_tanaman_biaya.columns else 0
 
     if not df_gh_kas_biaya.empty and "Kategori" in df_gh_kas_biaya.columns and "Kas Keluar" in df_gh_kas_biaya.columns:
         mask_bangunan_gh = df_gh_kas_biaya["Kategori"].astype(str).str.strip().str.lower() == "bangunan"
