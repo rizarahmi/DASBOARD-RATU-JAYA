@@ -1159,9 +1159,17 @@ if date_range and isinstance(date_range, tuple) and len(date_range) == 2:
     if not df_piutang_luar_filtered.empty and "Tanggal_Lengkap" in df_piutang_luar_filtered.columns:
         df_piutang_luar_filtered = df_piutang_luar_filtered[(df_piutang_luar_filtered["Tanggal_Lengkap"] >= start_ts) & (df_piutang_luar_filtered["Tanggal_Lengkap"] <= end_ts)]
     if not df_gh_kas_biaya.empty and "Tanggal_Lengkap" in df_gh_kas_biaya.columns:
-        df_gh_kas_biaya = df_gh_kas_biaya[(df_gh_kas_biaya["Tanggal_Lengkap"] >= start_ts) & (df_gh_kas_biaya["Tanggal_Lengkap"] <= end_ts)]
+        _mask_gh_kas = (
+            ((df_gh_kas_biaya["Tanggal_Lengkap"] >= start_ts) & (df_gh_kas_biaya["Tanggal_Lengkap"] <= end_ts))
+            | df_gh_kas_biaya["Tanggal_Lengkap"].isna()
+        )
+        df_gh_kas_biaya = df_gh_kas_biaya[_mask_gh_kas]
     if not df_gh_tanaman_biaya.empty and "Tanggal_Lengkap" in df_gh_tanaman_biaya.columns:
-        df_gh_tanaman_biaya = df_gh_tanaman_biaya[(df_gh_tanaman_biaya["Tanggal_Lengkap"] >= start_ts) & (df_gh_tanaman_biaya["Tanggal_Lengkap"] <= end_ts)]
+        _mask_gh_tanaman = (
+            ((df_gh_tanaman_biaya["Tanggal_Lengkap"] >= start_ts) & (df_gh_tanaman_biaya["Tanggal_Lengkap"] <= end_ts))
+            | df_gh_tanaman_biaya["Tanggal_Lengkap"].isna()
+        )
+        df_gh_tanaman_biaya = df_gh_tanaman_biaya[_mask_gh_tanaman]
     def _find_tgl_panen_col(cols):
         for c in cols:
             cu = c.strip().upper()
