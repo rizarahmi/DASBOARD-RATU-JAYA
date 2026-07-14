@@ -492,8 +492,8 @@ def load_penjualan_lapak_luar() -> pd.DataFrame:
     col_nama          = _col_at(3)
     col_grade         = _col_at(7)
     col_kg            = _col_at(9)
-    col_omzet         = _col_at(18)
-    col_laba          = _col_at(19)
+    col_omzet         = _col_at(17)
+    col_laba          = _col_at(18)
 
     def _find(names):
         for n in names:
@@ -1367,11 +1367,9 @@ with tab1:
 
     with st.container(border=True):
         st.markdown('<div class="income-card-title">🏬 Pendapatan Lapak Luar</div>', unsafe_allow_html=True)
-        l1, l2, l3, l4 = st.columns(4)
+        l1, l2 = st.columns(2)
         l1.metric("Omzet Lapak Luar", rp(omzet_lapak_luar))
         l2.metric("Laba Lapak Luar",  rp(laba_lapak_luar))
-        l3.metric("Tunai",            rp(tunai_lapak_luar))
-        l4.metric("Kredit",           rp(kredit_lapak_luar))
 
     with st.container(border=True):
         st.markdown('<div class="income-card-title">🚛 Pendapatan Ekspedisi</div>', unsafe_allow_html=True)
