@@ -479,18 +479,21 @@ def load_penjualan_lapak_luar() -> pd.DataFrame:
 
     all_cols = list(df.columns)
 
-    def _get_col_by_pos_or_name(idx, name_candidates):
-        for name in name_candidates:
-            matches = [c for c in all_cols if c.strip().lower() == name.lower()]
-            if matches:
-                return matches[0]
-        if idx < len(all_cols):
-            return all_cols[idx]
-        return None
+    def _col_at(idx):
+        return all_cols[idx] if idx < len(all_cols) else None
 
-    col_nama  = _get_col_by_pos_or_name(3,  ["nama pelanggan", "nama", "customer", "pelanggan"])
-    col_omzet = _get_col_by_pos_or_name(18, ["total harga", "total_harga", "omzet", "total"])
-    col_laba  = _get_col_by_pos_or_name(19, ["keuntungan", "laba", "profit"])
+    # Posisi kolom sheet PENJUALAN LAPAK LUAR (dikonfirmasi manual, dipakai apa adanya
+    # tanpa pencocokan nama supaya tidak salah ambil kolom lain):
+    # A=Tanggal, B=Tanggal Nota Balik, C=Invoice, D=Nama Pelanggan,
+    # H=Grade, J=Tonnase Nota Balik, S=Omzet, T=Laba
+    col_tanggal       = _col_at(0)
+    col_tgl_notabalik = _col_at(1)
+    col_invoice       = _col_at(2)
+    col_nama          = _col_at(3)
+    col_grade         = _col_at(7)
+    col_kg            = _col_at(9)
+    col_omzet         = _col_at(18)
+    col_laba          = _col_at(19)
 
     def _find(names):
         for n in names:
@@ -498,26 +501,27 @@ def load_penjualan_lapak_luar() -> pd.DataFrame:
             if m: return m[0]
         return None
 
-    col_jenis      = _find(["jenis", "jenis tanaman", "nama barang", "produk", "komoditas"])
-    col_grade      = _find(["grade", "kelas", "mutu"])
-    col_kg         = _find(["jumlah (kg)", "jumlah kg", "kg", "jumlah", "berat"])
     col_tunai      = _find(["tunai", "cash"])
     col_kredit     = _find(["kredit", "credit", "piutang"])
     col_keterangan = _find(["keterangan", "ket", "note", "catatan"])
 
     rename_map = {}
+    if col_tanggal and col_tanggal != "TANGGAL":
+        rename_map[col_tanggal] = "TANGGAL"
+    if col_tgl_notabalik and col_tgl_notabalik != "TANGGAL NOTA BALIK":
+        rename_map[col_tgl_notabalik] = "TANGGAL NOTA BALIK"
+    if col_invoice and col_invoice != "INVOICE":
+        rename_map[col_invoice] = "INVOICE"
     if col_nama and col_nama != "NAMA PELANGGAN":
         rename_map[col_nama] = "NAMA PELANGGAN"
-    if col_omzet and col_omzet != "Total harga":
-        rename_map[col_omzet] = "Total harga"
-    if col_laba and col_laba != "Keuntungan":
-        rename_map[col_laba] = "Keuntungan"
-    if col_jenis and col_jenis != "JENIS":
-        rename_map[col_jenis] = "JENIS"
     if col_grade and col_grade != "GRADE":
         rename_map[col_grade] = "GRADE"
     if col_kg and col_kg != "Jumlah (KG)":
         rename_map[col_kg] = "Jumlah (KG)"
+    if col_omzet and col_omzet != "Total harga":
+        rename_map[col_omzet] = "Total harga"
+    if col_laba and col_laba != "Keuntungan":
+        rename_map[col_laba] = "Keuntungan"
     if col_tunai and col_tunai != "Tunai":
         rename_map[col_tunai] = "Tunai"
     if col_kredit and col_kredit != "Kredit":
@@ -527,17 +531,32 @@ def load_penjualan_lapak_luar() -> pd.DataFrame:
     if rename_map:
         df = df.rename(columns=rename_map)
 
+    # Tanggal/Tanggal Nota Balik/Invoice/Nama Pelanggan hanya terisi di baris pertama
+    # tiap invoice di sheet (baris grade berikutnya kosong, gaya sel gabungan). Isi ke
+    # bawah supaya tiap baris grade tetap terhubung ke invoice yang benar -- ini akar
+    # penyebab Total Omzet/Laba (dan rekap per Nama Pelanggan) sempat salah, karena
+    # baris lanjutan yang Nama Pelanggan-nya kosong ikut terbuang oleh filter lama.
+    for col in ["TANGGAL", "TANGGAL NOTA BALIK", "INVOICE", "NAMA PELANGGAN"]:
+        if col in df.columns:
+            df[col] = df[col].replace(r"^\s*$", np.nan, regex=True)
+            df[col] = df[col].ffill()
+
     for col in ["Total harga", "Keuntungan", "Tunai", "Kredit", "Jumlah (KG)"]:
         if col in df.columns:
             df[col] = to_number(df[col])
 
     df = _parse_tanggal(df)
 
+    if "TANGGAL NOTA BALIK" in df.columns:
+        df["Tanggal_Nota_Balik"] = pd.to_datetime(df["TANGGAL NOTA BALIK"], dayfirst=True, errors="coerce")
+
     df["Is_Dibuang"] = df["Keterangan"].apply(is_filled) if "Keterangan" in df.columns else False
-    if "NAMA PELANGGAN" in df.columns:
-        df = df[df["NAMA PELANGGAN"].apply(is_filled)].reset_index(drop=True)
+    if "INVOICE" in df.columns:
+        df = df[df["INVOICE"].apply(is_filled)].reset_index(drop=True)
 
     return df
+
+
 
 @st.cache_data(ttl=300, show_spinner="Memuat Arus Kas...")
 def load_arus_kas() -> pd.DataFrame:
@@ -2122,6 +2141,64 @@ with tab2b:
         has_kredit_luar      = "Kredit"      in df_penjualan_luar.columns
         has_omzet_laba_luar  = "Total harga" in df_penjualan_luar.columns and "Keuntungan" in df_penjualan_luar.columns
 
+        section_heading("📋 Rincian Data Penjualan Lapak Luar")
+        kolom_rincian_ada = [
+            src for src in ["TANGGAL", "TANGGAL NOTA BALIK", "INVOICE", NAMA_COL_LUAR, GRADE_COL_LUAR, KG_COL_LUAR]
+            if src in df_penjualan_luar.columns
+        ]
+        if not kolom_rincian_ada and not has_omzet_laba_luar:
+            st.info("Kolom rincian (Tanggal/Invoice/Nama Pelanggan/Grade/Tonnase/Omzet/Laba) tidak ditemukan di sheet PENJUALAN LAPAK LUAR.")
+        else:
+            df_rincian_luar = df_penjualan_luar.copy()
+
+            if "INVOICE" in df_rincian_luar.columns and "Total harga" in df_rincian_luar.columns:
+                df_rincian_luar["Total Omzet per Invoice"] = df_rincian_luar.groupby("INVOICE")["Total harga"].transform("sum")
+            if "INVOICE" in df_rincian_luar.columns and "Keuntungan" in df_rincian_luar.columns:
+                df_rincian_luar["Total Laba per Invoice"] = df_rincian_luar.groupby("INVOICE")["Keuntungan"].transform("sum")
+
+            sort_cols_rl, sort_asc_rl = [], []
+            if "Tanggal_Lengkap" in df_rincian_luar.columns:
+                sort_cols_rl.append("Tanggal_Lengkap"); sort_asc_rl.append(False)
+            if "INVOICE" in df_rincian_luar.columns:
+                sort_cols_rl.append("INVOICE"); sort_asc_rl.append(True)
+            if sort_cols_rl:
+                df_rincian_luar = df_rincian_luar.sort_values(sort_cols_rl, ascending=sort_asc_rl, na_position="last")
+
+            df_tampil_luar = pd.DataFrame(index=df_rincian_luar.index)
+            if "TANGGAL" in df_rincian_luar.columns:
+                if "Tanggal_Lengkap" in df_rincian_luar.columns:
+                    _tgl_fmt = df_rincian_luar["Tanggal_Lengkap"].dt.strftime("%d/%m/%Y")
+                    df_tampil_luar["Tanggal"] = _tgl_fmt.fillna(df_rincian_luar["TANGGAL"])
+                else:
+                    df_tampil_luar["Tanggal"] = df_rincian_luar["TANGGAL"]
+            if "TANGGAL NOTA BALIK" in df_rincian_luar.columns:
+                if "Tanggal_Nota_Balik" in df_rincian_luar.columns:
+                    _tnb_fmt = df_rincian_luar["Tanggal_Nota_Balik"].dt.strftime("%d/%m/%Y")
+                    df_tampil_luar["Tanggal Nota Balik"] = _tnb_fmt.fillna(df_rincian_luar["TANGGAL NOTA BALIK"])
+                else:
+                    df_tampil_luar["Tanggal Nota Balik"] = df_rincian_luar["TANGGAL NOTA BALIK"]
+            if "INVOICE" in df_rincian_luar.columns:
+                df_tampil_luar["Invoice"] = df_rincian_luar["INVOICE"]
+            if NAMA_COL_LUAR in df_rincian_luar.columns:
+                df_tampil_luar["Nama Pelanggan"] = df_rincian_luar[NAMA_COL_LUAR]
+            if GRADE_COL_LUAR in df_rincian_luar.columns:
+                df_tampil_luar["Grade"] = df_rincian_luar[GRADE_COL_LUAR]
+            if KG_COL_LUAR in df_rincian_luar.columns:
+                df_tampil_luar["Tonnase Nota Balik"] = df_rincian_luar[KG_COL_LUAR].apply(lambda x: f"{x:,.1f} KG" if pd.notna(x) else "-")
+            if "Total harga" in df_rincian_luar.columns:
+                df_tampil_luar["Omzet"] = df_rincian_luar["Total harga"].apply(rp)
+            if "Total Omzet per Invoice" in df_rincian_luar.columns:
+                df_tampil_luar["Total Omzet per Invoice"] = df_rincian_luar["Total Omzet per Invoice"].apply(rp)
+            if "Keuntungan" in df_rincian_luar.columns:
+                df_tampil_luar["Laba"] = df_rincian_luar["Keuntungan"].apply(rp)
+            if "Total Laba per Invoice" in df_rincian_luar.columns:
+                df_tampil_luar["Total Laba per Invoice"] = df_rincian_luar["Total Laba per Invoice"].apply(rp)
+
+            st.dataframe(df_tampil_luar, use_container_width=True, hide_index=True)
+            st.caption(f"📌 {len(df_tampil_luar)} baris · kolom 'Total Omzet/Laba per Invoice' menjumlahkan semua baris grade yang berbagi nomor Invoice yang sama, untuk verifikasi terhadap kolom Omzet/Laba mentah.")
+
+        st.divider()
+
         if has_kg_luar:
             df_ton_all_luar = df_penjualan_luar.copy()
             df_ton_all_luar[KG_COL_LUAR] = to_number(df_ton_all_luar[KG_COL_LUAR])
@@ -2137,46 +2214,6 @@ with tab2b:
             tonl1.metric("⚖️ Total Tonnase Terjual", f"{total_kg_terjual_luar:,.1f} KG")
             tonl2.metric("🗑️ Total Tonnase Dibuang", f"{total_kg_dibuang_luar:,.1f} KG")
             tonl3.metric("📦 Total Tonnase Keseluruhan", f"{total_kg_semua_luar:,.1f} KG")
-            st.divider()
-
-        if has_grade_luar or has_jenis_luar:
-            section_heading("🏆 Grade & Jenis Terlaris")
-            col_tll1, col_tll2 = st.columns(2)
-
-            with col_tll1:
-                if has_grade_luar and has_kg_luar:
-                    df_gl = df_penjualan_luar.copy()
-                    df_gl[KG_COL_LUAR] = to_number(df_gl[KG_COL_LUAR])
-                    grade_rank_luar = (
-                        df_gl[df_gl[KG_COL_LUAR].notna() & df_gl[GRADE_COL_LUAR].apply(is_filled)]
-                        .groupby(GRADE_COL_LUAR)[KG_COL_LUAR].sum()
-                        .sort_values(ascending=False)
-                    )
-                    if not grade_rank_luar.empty:
-                        st.metric("🥇 Grade Terlaris", str(grade_rank_luar.index[0]),
-                                  f"{grade_rank_luar.iloc[0]:,.1f} KG")
-                    else:
-                        st.info("Belum ada data grade.")
-                else:
-                    st.info("Kolom GRADE tidak ditemukan.")
-
-            with col_tll2:
-                if has_jenis_luar and has_kg_luar:
-                    df_jl = df_penjualan_luar.copy()
-                    df_jl[KG_COL_LUAR] = to_number(df_jl[KG_COL_LUAR])
-                    jenis_rank_luar = (
-                        df_jl[df_jl[KG_COL_LUAR].notna() & df_jl[JENIS_COL_LUAR].apply(is_filled)]
-                        .groupby(JENIS_COL_LUAR)[KG_COL_LUAR].sum()
-                        .sort_values(ascending=False)
-                    )
-                    if not jenis_rank_luar.empty:
-                        st.metric("🥇 Jenis Terlaris", str(jenis_rank_luar.index[0]),
-                                  f"{jenis_rank_luar.iloc[0]:,.1f} KG")
-                    else:
-                        st.info("Belum ada data jenis.")
-                else:
-                    st.info("Kolom JENIS tidak ditemukan.")
-
             st.divider()
 
         section_heading("📊 Omzet & Profit per Pelanggan")
