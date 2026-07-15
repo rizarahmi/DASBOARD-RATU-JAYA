@@ -420,11 +420,12 @@ def load_penjualan_lapak() -> pd.DataFrame:
             return all_cols[idx]
         return None
 
-    col_omzet = _get_col_by_pos_or_name(18, ["total harga", "total_harga", "omzet", "total"])
-    col_laba  = _get_col_by_pos_or_name(19, ["keuntungan", "laba", "profit"])
-    col_jenis = _get_col_by_pos_or_name(13, ["jenis", "jenis tanaman", "nama barang", "produk", "komoditas"])
-    col_grade = _get_col_by_pos_or_name(14, ["grade", "kelas", "mutu"])
-    col_kg    = _get_col_by_pos_or_name(15, ["jumlah (kg)", "jumlah kg", "kg", "jumlah", "berat"])
+    col_omzet   = _get_col_by_pos_or_name(18, ["total harga", "total_harga", "omzet", "total"])
+    col_laba    = _get_col_by_pos_or_name(19, ["keuntungan", "laba", "profit"])
+    col_jenis   = _get_col_by_pos_or_name(13, ["jenis", "jenis tanaman", "nama barang", "produk", "komoditas"])
+    col_grade   = _get_col_by_pos_or_name(14, ["grade", "kelas", "mutu"])
+    col_kg      = _get_col_by_pos_or_name(15, ["jumlah (kg)", "jumlah kg", "kg", "jumlah", "berat"])
+    col_invoice = _get_col_by_pos_or_name(5,  ["invoice", "no invoice", "nomor invoice"])
 
     def _find(names):
         for n in names:
@@ -448,6 +449,8 @@ def load_penjualan_lapak() -> pd.DataFrame:
         rename_map[col_grade] = "GRADE"
     if col_kg and col_kg != "Jumlah (KG)":
         rename_map[col_kg] = "Jumlah (KG)"
+    if col_invoice and col_invoice != "INVOICE":
+        rename_map[col_invoice] = "INVOICE"
     if col_tunai and col_tunai != "Tunai":
         rename_map[col_tunai] = "Tunai"
     if col_kredit and col_kredit != "Kredit":
@@ -950,17 +953,18 @@ def load_stok_gudang() -> pd.DataFrame:
                 return m[0]
         return None
 
-    col_tanggal     = _get_col(0,  ["tanggal", "tgl", "date", "timestamp"])
-    col_invoice     = _get_col(1,  ["invoice", "no invoice", "nomor invoice"])
-    col_asal        = _get_col(5,  ["asal barang", "asal"])
-    col_penimbang   = _get_col(6,  ["penimbang"])
-    col_tujuan      = _get_col(7,  ["tujuan", "kode gudang", "gudang", "lokasi"])
-    col_nopol       = _get_col(8,  ["nopol", "no polisi", "plat nomor"])
-    col_jenis       = _get_col(10, ["jenis", "jenis tanaman", "nama barang", "produk", "komoditas"])
-    col_grade       = _get_col(11, ["grade", "kelas", "mutu"])
-    col_stok        = _get_col(19, ["stok gudang", "stok"])
-    col_harga_beli  = _find_name_only(["harga beli"])
-    col_harga_modal = _find_name_only(["harga modal"])
+    col_tanggal        = _get_col(0,  ["tanggal", "tgl", "date", "timestamp"])
+    col_invoice        = _get_col(1,  ["invoice", "no invoice", "nomor invoice"])
+    col_asal           = _get_col(5,  ["asal barang", "asal"])
+    col_penimbang      = _get_col(6,  ["penimbang"])
+    col_tujuan         = _get_col(7,  ["tujuan", "kode gudang", "gudang", "lokasi"])
+    col_nopol          = _get_col(8,  ["nopol", "no polisi", "plat nomor"])
+    col_jenis          = _get_col(10, ["jenis", "jenis tanaman", "nama barang", "produk", "komoditas"])
+    col_grade          = _get_col(11, ["grade", "kelas", "mutu"])
+    col_jumlah_grading = _get_col(13, ["jumlah grading", "jumlah_grading"])
+    col_stok           = _get_col(19, ["stok gudang", "stok"])
+    col_harga_beli     = _find_name_only(["harga beli"])
+    col_harga_modal    = _find_name_only(["harga modal"])
 
     rename_map = {}
     if col_tanggal and col_tanggal != "TANGGAL":
@@ -979,6 +983,8 @@ def load_stok_gudang() -> pd.DataFrame:
         rename_map[col_jenis] = "JENIS"
     if col_grade and col_grade != "GRADE":
         rename_map[col_grade] = "GRADE"
+    if col_jumlah_grading and col_jumlah_grading != "JUMLAH GRADING":
+        rename_map[col_jumlah_grading] = "JUMLAH GRADING"
     if col_stok and col_stok != "STOK GUDANG":
         rename_map[col_stok] = "STOK GUDANG"
     if col_harga_beli and col_harga_beli != "HARGA BELI":
@@ -990,6 +996,8 @@ def load_stok_gudang() -> pd.DataFrame:
 
     if "STOK GUDANG" in df.columns:
         df["STOK GUDANG"] = to_number(df["STOK GUDANG"])
+    if "JUMLAH GRADING" in df.columns:
+        df["JUMLAH GRADING"] = to_number(df["JUMLAH GRADING"])
     if "HARGA BELI" in df.columns:
         df["HARGA BELI"] = to_number(df["HARGA BELI"])
     if "HARGA MODAL" in df.columns:
@@ -1515,7 +1523,17 @@ with tab2:
     if df_stok_gudang_raw.empty or "INVOICE" not in df_stok_gudang_raw.columns:
         st.info("Kolom 'INVOICE' tidak ditemukan di sheet STOK GUDANG (atau datanya kosong), jadi rekap Close Barang Selesai belum bisa ditampilkan.")
     else:
-        invoice_opts_cbs = sorted(df_stok_gudang_raw["INVOICE"].dropna().astype(str).unique())
+        def _invoice_sort_key_cbs(s):
+            if pd.isna(s):
+                return (-1, "")
+            s = str(s)
+            digits = "".join(ch for ch in s if ch.isdigit())
+            return (int(digits) if digits else -1, s)
+
+        invoice_opts_cbs = sorted(
+            df_stok_gudang_raw["INVOICE"].dropna().astype(str).unique(),
+            key=_invoice_sort_key_cbs, reverse=True
+        )
         if not invoice_opts_cbs:
             st.info("Belum ada nomor Invoice di sheet STOK GUDANG.")
         else:
@@ -1537,24 +1555,45 @@ with tab2:
                 for _col, (lbl_info, val_info) in zip(info_cols_cbs, info_fields_cbs):
                     _col.metric(lbl_info, val_info)
 
-            # Stock Terjual / Total Pendapatan / Keuntungan Bersih diambil dari sheet
-            # PENJUALAN LAPAK, dicocokkan berdasarkan GRADE yang sama, mengikuti filter
-            # rentang tanggal di sidebar (konsisten dengan bagian lain dashboard).
+            # Stock Grading (KG): sheet STOK GUDANG kolom N "Jumlah Grading", dicocokkan
+            # ke Invoice (sudah difilter di atas) + Jenis + Grade yang sama -- dijumlah
+            # kalau ada lebih dari 1 baris grading untuk kombinasi Jenis+Grade yang sama.
+            if "JUMLAH GRADING" in df_cbs.columns and "JENIS" in df_cbs.columns and "GRADE" in df_cbs.columns:
+                df_cbs["Stock Grading (KG)"] = df_cbs.groupby(["JENIS", "GRADE"])["JUMLAH GRADING"].transform(lambda s: s.sum(min_count=1))
+            elif "JUMLAH GRADING" in df_cbs.columns:
+                df_cbs["Stock Grading (KG)"] = df_cbs["JUMLAH GRADING"]
+
+            # Stock Terjual (KG) / Total Pendapatan (Rp) / Keuntungan Bersih (Rp): sheet
+            # PENJUALAN LAPAK kolom P/S/T, dicocokkan ke Invoice (kolom F) + Jenis (N) +
+            # Grade (O) yang sama. Sengaja pakai data semua tanggal (bukan df_penjualan
+            # yang ikut filter sidebar), karena penjualan 1 invoice bisa saja jatuh di
+            # luar rentang tanggal yang lagi dipilih di sidebar.
             agg_jual_cbs = {}
-            if "Jumlah (KG)" in df_penjualan.columns:
+            if "Jumlah (KG)" in df_penjualan_raw.columns:
                 agg_jual_cbs["Stock Terjual (KG)"] = ("Jumlah (KG)", "sum")
-            if "Total harga" in df_penjualan.columns:
+            if "Total harga" in df_penjualan_raw.columns:
                 agg_jual_cbs["Total Pendapatan (Rp)"] = ("Total harga", "sum")
-            if "Keuntungan" in df_penjualan.columns:
+            if "Keuntungan" in df_penjualan_raw.columns:
                 agg_jual_cbs["Keuntungan Bersih (Rp)"] = ("Keuntungan", "sum")
 
-            if agg_jual_cbs and "GRADE" in df_penjualan.columns and "GRADE" in df_cbs.columns:
-                df_jual_grade_cbs = df_penjualan.groupby("GRADE").agg(**agg_jual_cbs).reset_index()
-                df_cbs = df_cbs.merge(df_jual_grade_cbs, on="GRADE", how="left")
+            if (agg_jual_cbs and "INVOICE" in df_penjualan_raw.columns
+                    and "JENIS" in df_penjualan_raw.columns and "GRADE" in df_penjualan_raw.columns
+                    and "JENIS" in df_cbs.columns and "GRADE" in df_cbs.columns):
+                df_penjualan_invoice_cbs = df_penjualan_raw[df_penjualan_raw["INVOICE"].astype(str) == sel_invoice_cbs]
+                if not df_penjualan_invoice_cbs.empty:
+                    df_jual_grade_cbs = df_penjualan_invoice_cbs.groupby(["JENIS", "GRADE"]).agg(**agg_jual_cbs).reset_index()
+                    df_cbs = df_cbs.merge(df_jual_grade_cbs, on=["JENIS", "GRADE"], how="left")
 
             for _c in ["Stock Terjual (KG)", "Total Pendapatan (Rp)", "Keuntungan Bersih (Rp)"]:
                 if _c in df_cbs.columns:
                     df_cbs[_c] = df_cbs[_c].fillna(0)
+
+            # Harga Beli & Harga Modal di sheet STOK GUDANG adalah harga per KG --
+            # dikalikan Stock Grading (KG) supaya jadi nilai total yang ditampilkan.
+            if "HARGA BELI" in df_cbs.columns and "Stock Grading (KG)" in df_cbs.columns:
+                df_cbs["Harga Beli"] = df_cbs["HARGA BELI"] * df_cbs["Stock Grading (KG)"]
+            if "HARGA MODAL" in df_cbs.columns and "Stock Grading (KG)" in df_cbs.columns:
+                df_cbs["Harga Modal"] = df_cbs["HARGA MODAL"] * df_cbs["Stock Grading (KG)"]
 
             kolom_cbs = [
                 ("JENIS", "Jenis", "txt"),
@@ -1562,9 +1601,9 @@ with tab2:
                 ("Stock Terjual (KG)", "Stock Terjual (KG)", "num"),
                 ("Total Pendapatan (Rp)", "Total Pendapatan (Rp)", "rp"),
                 ("Keuntungan Bersih (Rp)", "Keuntungan Bersih (Rp)", "rp"),
-                ("STOK GUDANG", "Stock Grading (KG)", "num"),
-                ("HARGA BELI", "Harga Beli", "rp"),
-                ("HARGA MODAL", "Harga Modal", "rp"),
+                ("Stock Grading (KG)", "Stock Grading (KG)", "num"),
+                ("Harga Beli", "Harga Beli", "rp"),
+                ("Harga Modal", "Harga Modal", "rp"),
             ]
             kolom_cbs_ada = [(src, lbl, tp) for src, lbl, tp in kolom_cbs if src in df_cbs.columns]
             kolom_cbs_hilang = [lbl for src, lbl, tp in kolom_cbs if src not in df_cbs.columns]
@@ -1621,7 +1660,7 @@ with tab2:
 <tbody>{"".join(body_rows_cbs)}</tbody>
 </table></div>"""
                 st.markdown(cbs_html, unsafe_allow_html=True)
-                caption_cbs = f"📌 {len(df_cbs)} baris untuk Invoice {sel_invoice_cbs}. Stock Terjual (KG), Total Pendapatan (Rp), dan Keuntungan Bersih (Rp) dicocokkan berdasarkan Grade yang sama dari sheet PENJUALAN LAPAK, mengikuti filter tanggal di sidebar. Kolom lain diambil langsung dari sheet STOK GUDANG."
+                caption_cbs = f"📌 {len(df_cbs)} baris untuk Invoice {sel_invoice_cbs}. Stock Terjual (KG), Total Pendapatan (Rp), dan Keuntungan Bersih (Rp) dicocokkan ke sheet PENJUALAN LAPAK berdasarkan Invoice + Jenis + Grade yang sama (bukan dibatasi filter tanggal sidebar). Stock Grading (KG) dari sheet STOK GUDANG kolom 'Jumlah Grading', dicocokkan Jenis + Grade dalam invoice ini. Harga Beli & Harga Modal = harga per KG di STOK GUDANG dikali Stock Grading (KG)."
                 if kolom_cbs_hilang:
                     caption_cbs += f" Kolom belum ketemu (tidak ditampilkan): {', '.join(kolom_cbs_hilang)}."
                 st.caption(caption_cbs)
