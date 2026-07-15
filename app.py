@@ -943,31 +943,67 @@ def load_stok_gudang() -> pd.DataFrame:
             return all_cols[idx]
         return None
 
-    col_tujuan = _get_col(7,  ["tujuan", "kode gudang", "gudang"])
-    col_jenis  = _get_col(10, ["jenis", "jenis tanaman", "nama barang", "produk", "komoditas"])
-    col_grade  = _get_col(11, ["grade", "kelas", "mutu"])
-    col_stok   = _get_col(19, ["stok gudang", "stok"])
+    def _find_name_only(names):
+        for n in names:
+            m = [c for c in all_cols if c.strip().lower() == n.lower()]
+            if m:
+                return m[0]
+        return None
+
+    col_tanggal     = _get_col(0,  ["tanggal", "tgl", "date", "timestamp"])
+    col_invoice     = _get_col(1,  ["invoice", "no invoice", "nomor invoice"])
+    col_asal        = _get_col(5,  ["asal barang", "asal"])
+    col_penimbang   = _get_col(6,  ["penimbang"])
+    col_tujuan      = _get_col(7,  ["tujuan", "kode gudang", "gudang", "lokasi"])
+    col_nopol       = _get_col(8,  ["nopol", "no polisi", "plat nomor"])
+    col_jenis       = _get_col(10, ["jenis", "jenis tanaman", "nama barang", "produk", "komoditas"])
+    col_grade       = _get_col(11, ["grade", "kelas", "mutu"])
+    col_stok        = _get_col(19, ["stok gudang", "stok"])
+    col_harga_beli  = _find_name_only(["harga beli"])
+    col_harga_modal = _find_name_only(["harga modal"])
 
     rename_map = {}
+    if col_tanggal and col_tanggal != "TANGGAL":
+        rename_map[col_tanggal] = "TANGGAL"
+    if col_invoice and col_invoice != "INVOICE":
+        rename_map[col_invoice] = "INVOICE"
+    if col_asal and col_asal != "ASAL BARANG":
+        rename_map[col_asal] = "ASAL BARANG"
+    if col_penimbang and col_penimbang != "PENIMBANG":
+        rename_map[col_penimbang] = "PENIMBANG"
     if col_tujuan and col_tujuan != "TUJUAN":
         rename_map[col_tujuan] = "TUJUAN"
+    if col_nopol and col_nopol != "NOPOL":
+        rename_map[col_nopol] = "NOPOL"
     if col_jenis and col_jenis != "JENIS":
         rename_map[col_jenis] = "JENIS"
     if col_grade and col_grade != "GRADE":
         rename_map[col_grade] = "GRADE"
     if col_stok and col_stok != "STOK GUDANG":
         rename_map[col_stok] = "STOK GUDANG"
+    if col_harga_beli and col_harga_beli != "HARGA BELI":
+        rename_map[col_harga_beli] = "HARGA BELI"
+    if col_harga_modal and col_harga_modal != "HARGA MODAL":
+        rename_map[col_harga_modal] = "HARGA MODAL"
     if rename_map:
         df = df.rename(columns=rename_map)
 
     if "STOK GUDANG" in df.columns:
         df["STOK GUDANG"] = to_number(df["STOK GUDANG"])
+    if "HARGA BELI" in df.columns:
+        df["HARGA BELI"] = to_number(df["HARGA BELI"])
+    if "HARGA MODAL" in df.columns:
+        df["HARGA MODAL"] = to_number(df["HARGA MODAL"])
     if "JENIS" in df.columns:
         df["JENIS"] = df["JENIS"].astype(str).str.strip()
     if "GRADE" in df.columns:
         df["GRADE"] = df["GRADE"].astype(str).str.strip()
     if "TUJUAN" in df.columns:
+        df["LOKASI"] = df["TUJUAN"]
         df = df[df["TUJUAN"].apply(is_filled)].reset_index(drop=True)
+
+    if "TANGGAL" in df.columns:
+        df["Tanggal_Lengkap"] = pd.to_datetime(df["TANGGAL"], dayfirst=True, errors="coerce")
 
     return df
 
@@ -1475,6 +1511,113 @@ with tab1:
 
 # TAB 2: ANALISA LAPAK
 with tab2:
+    section_heading("🚛 Close Barang Selesai")
+    if df_stok_gudang_raw.empty or "INVOICE" not in df_stok_gudang_raw.columns:
+        st.info("Kolom 'INVOICE' tidak ditemukan di sheet STOK GUDANG (atau datanya kosong), jadi rekap Close Barang Selesai belum bisa ditampilkan.")
+    else:
+        invoice_opts_cbs = sorted(df_stok_gudang_raw["INVOICE"].dropna().astype(str).unique())
+        if not invoice_opts_cbs:
+            st.info("Belum ada nomor Invoice di sheet STOK GUDANG.")
+        else:
+            sel_invoice_cbs = st.selectbox("Invoice", invoice_opts_cbs, key="tab2_cbs_invoice")
+            df_cbs = df_stok_gudang_raw[df_stok_gudang_raw["INVOICE"].astype(str) == sel_invoice_cbs].copy()
+
+            # Stock Terjual / Total Pendapatan / Keuntungan Bersih diambil dari sheet
+            # PENJUALAN LAPAK, dicocokkan berdasarkan GRADE yang sama, mengikuti filter
+            # rentang tanggal di sidebar (konsisten dengan bagian lain dashboard).
+            agg_jual_cbs = {}
+            if "Jumlah (KG)" in df_penjualan.columns:
+                agg_jual_cbs["Stock Terjual (KG)"] = ("Jumlah (KG)", "sum")
+            if "Total harga" in df_penjualan.columns:
+                agg_jual_cbs["Total Pendapatan (Rp)"] = ("Total harga", "sum")
+            if "Keuntungan" in df_penjualan.columns:
+                agg_jual_cbs["Keuntungan Bersih (Rp)"] = ("Keuntungan", "sum")
+
+            if agg_jual_cbs and "GRADE" in df_penjualan.columns and "GRADE" in df_cbs.columns:
+                df_jual_grade_cbs = df_penjualan.groupby("GRADE").agg(**agg_jual_cbs).reset_index()
+                df_cbs = df_cbs.merge(df_jual_grade_cbs, on="GRADE", how="left")
+
+            for _c in ["Stock Terjual (KG)", "Total Pendapatan (Rp)", "Keuntungan Bersih (Rp)"]:
+                if _c in df_cbs.columns:
+                    df_cbs[_c] = df_cbs[_c].fillna(0)
+
+            kolom_cbs = [
+                ("TANGGAL", "Tanggal", "txt"),
+                ("NOPOL", "Nopol", "txt"),
+                ("PENIMBANG", "Penimbang", "txt"),
+                ("ASAL BARANG", "Asal Barang", "txt"),
+                ("LOKASI", "Lokasi", "txt"),
+                ("JENIS", "Jenis", "txt"),
+                ("GRADE", "Grade", "txt"),
+                ("Stock Terjual (KG)", "Stock Terjual (KG)", "num"),
+                ("Total Pendapatan (Rp)", "Total Pendapatan (Rp)", "rp"),
+                ("Keuntungan Bersih (Rp)", "Keuntungan Bersih (Rp)", "rp"),
+                ("STOK GUDANG", "Stock Grading (KG)", "num"),
+                ("HARGA BELI", "Harga Beli", "rp"),
+                ("HARGA MODAL", "Harga Modal", "rp"),
+            ]
+            kolom_cbs_ada = [(src, lbl, tp) for src, lbl, tp in kolom_cbs if src in df_cbs.columns]
+            kolom_cbs_hilang = [lbl for src, lbl, tp in kolom_cbs if src not in df_cbs.columns]
+
+            if not kolom_cbs_ada:
+                st.info("Kolom untuk rekap Close Barang Selesai tidak ditemukan di sheet STOK GUDANG.")
+            else:
+                def _esc_cbs(x):
+                    s = "" if x is None else str(x)
+                    return (s.replace("&", "&amp;").replace("<", "&lt;")
+                             .replace(">", "&gt;").replace('"', "&quot;"))
+
+                def _fmt_cbs(v, tp):
+                    if tp == "rp":
+                        return rp(v) if pd.notna(v) else ""
+                    if tp == "num":
+                        return f"{v:,.1f}" if pd.notna(v) else ""
+                    return "" if pd.isna(v) else str(v)
+
+                total_cells_html = []
+                for _idx, (src, lbl, tp) in enumerate(kolom_cbs_ada):
+                    if _idx == 0:
+                        total_cells_html.append("<td>TOTAL</td>")
+                    elif tp in ("rp", "num"):
+                        _tot = to_number(df_cbs[src]).sum()
+                        total_cells_html.append(f'<td class="cbs-num">{_esc_cbs(_fmt_cbs(_tot, tp))}</td>')
+                    else:
+                        total_cells_html.append("<td></td>")
+
+                header_html_cbs = "".join(f"<th>{_esc_cbs(lbl)}</th>" for _, lbl, _ in kolom_cbs_ada)
+
+                body_rows_cbs = []
+                for _, _row in df_cbs.iterrows():
+                    cells = []
+                    for src, lbl, tp in kolom_cbs_ada:
+                        v = _row.get(src)
+                        cls = ' class="cbs-num"' if tp in ("rp", "num") else ""
+                        cells.append(f"<td{cls}>{_esc_cbs(_fmt_cbs(v, tp))}</td>")
+                    body_rows_cbs.append(f"<tr>{''.join(cells)}</tr>")
+
+                cbs_html = f"""<style>
+.cbs-wrap {{ max-height: 520px; overflow: auto; border: 1px solid #e0e6f0; border-radius: 8px; }}
+.cbs-table {{ width: 100%; border-collapse: collapse; font-size: 13.5px; }}
+.cbs-table th {{ position: sticky; top: 32px; background: #1f3864; color: #fff; padding: 9px 10px; text-align: left; white-space: nowrap; z-index: 1; }}
+.cbs-table td {{ padding: 8px 10px; border-bottom: 1px solid #eef1f6; white-space: nowrap; }}
+.cbs-table td.cbs-num {{ text-align: right; }}
+.cbs-table tr.cbs-total-row td {{ position: sticky; top: 0; background: #4472c4; color: #fff; font-weight: 800; z-index: 2; }}
+</style>
+<div class="cbs-wrap"><table class="cbs-table">
+<thead>
+<tr class="cbs-total-row">{"".join(total_cells_html)}</tr>
+<tr>{header_html_cbs}</tr>
+</thead>
+<tbody>{"".join(body_rows_cbs)}</tbody>
+</table></div>"""
+                st.markdown(cbs_html, unsafe_allow_html=True)
+                caption_cbs = f"📌 {len(df_cbs)} baris untuk Invoice {sel_invoice_cbs}. Stock Terjual (KG), Total Pendapatan (Rp), dan Keuntungan Bersih (Rp) dicocokkan berdasarkan Grade yang sama dari sheet PENJUALAN LAPAK, mengikuti filter tanggal di sidebar. Kolom lain diambil langsung dari sheet STOK GUDANG."
+                if kolom_cbs_hilang:
+                    caption_cbs += f" Kolom belum ketemu (tidak ditampilkan): {', '.join(kolom_cbs_hilang)}."
+                st.caption(caption_cbs)
+
+    st.divider()
+
     section_heading("📦 Stok Lapak & Gudang")
     st.caption("📌 Stok Lapak dihitung dari entri 14 hari terakhir saja (berdasarkan tanggal di kolom A sheet STOK LAPAK). Stok Gudang menampilkan seluruh data yang tersedia.")
 
