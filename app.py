@@ -2179,10 +2179,12 @@ with tab2b:
 
             # Total per invoice dihitung setelah filter nama diterapkan, supaya tetap
             # akurat ke baris yang sedang tampil kalau tabelnya geser karena difilter.
+            # min_count=1 supaya invoice yang Omzet/Laba-nya kosong semua tetap kosong
+            # (bukan malah kebaca 0).
             if "INVOICE" in df_rincian_luar.columns and "Total harga" in df_rincian_luar.columns:
-                df_rincian_luar["Total Omzet per Invoice"] = df_rincian_luar.groupby("INVOICE")["Total harga"].transform("sum")
+                df_rincian_luar["Total Omzet per Invoice"] = df_rincian_luar.groupby("INVOICE")["Total harga"].transform(lambda s: s.sum(min_count=1))
             if "INVOICE" in df_rincian_luar.columns and "Keuntungan" in df_rincian_luar.columns:
-                df_rincian_luar["Total Laba per Invoice"] = df_rincian_luar.groupby("INVOICE")["Keuntungan"].transform("sum")
+                df_rincian_luar["Total Laba per Invoice"] = df_rincian_luar.groupby("INVOICE")["Keuntungan"].transform(lambda s: s.sum(min_count=1))
 
             if "INVOICE" in df_rincian_luar.columns:
                 def _invoice_sort_key(s):
@@ -2213,35 +2215,6 @@ with tab2b:
                 return (s.replace("&", "&amp;").replace("<", "&lt;")
                          .replace(">", "&gt;").replace('"', "&quot;"))
 
-            # kolom biasa: (label, list nilai per baris, kelas css opsional)
-            kolom_biasa = []
-            if "TANGGAL" in df_rincian_luar.columns:
-                if "Tanggal_Lengkap" in df_rincian_luar.columns:
-                    _tgl_fmt = df_rincian_luar["Tanggal_Lengkap"].dt.strftime("%d/%m/%Y")
-                    _vals = _tgl_fmt.where(_tgl_fmt.notna(), df_rincian_luar["TANGGAL"]).fillna("")
-                else:
-                    _vals = df_rincian_luar["TANGGAL"].fillna("")
-                kolom_biasa.append(("Tanggal", _vals.tolist(), ""))
-            if "TANGGAL NOTA BALIK" in df_rincian_luar.columns:
-                if "Tanggal_Nota_Balik" in df_rincian_luar.columns:
-                    _tnb_fmt = df_rincian_luar["Tanggal_Nota_Balik"].dt.strftime("%d/%m/%Y")
-                    _vals = _tnb_fmt.where(_tnb_fmt.notna(), df_rincian_luar["TANGGAL NOTA BALIK"]).fillna("")
-                else:
-                    _vals = df_rincian_luar["TANGGAL NOTA BALIK"].fillna("")
-                kolom_biasa.append(("Tanggal Nota Balik", _vals.tolist(), ""))
-            if "INVOICE" in df_rincian_luar.columns:
-                kolom_biasa.append(("Invoice", df_rincian_luar["INVOICE"].fillna("").tolist(), ""))
-            if NAMA_COL_LUAR in df_rincian_luar.columns:
-                kolom_biasa.append(("Nama Pelanggan", df_rincian_luar[NAMA_COL_LUAR].fillna("").tolist(), ""))
-            if GRADE_COL_LUAR in df_rincian_luar.columns:
-                kolom_biasa.append(("Grade", df_rincian_luar[GRADE_COL_LUAR].fillna("").tolist(), ""))
-            if KG_COL_LUAR in df_rincian_luar.columns:
-                kolom_biasa.append(("Tonnase Nota Balik", _fmt_blank(df_rincian_luar[KG_COL_LUAR], lambda x: f"{x:,.1f} KG").tolist(), "rl-num"))
-            if "Total harga" in df_rincian_luar.columns:
-                kolom_biasa.append(("Omzet", _fmt_blank(df_rincian_luar["Total harga"], rp).tolist(), "rl-num"))
-            if "Keuntungan" in df_rincian_luar.columns:
-                kolom_biasa.append(("Laba", _fmt_blank(df_rincian_luar["Keuntungan"], rp).tolist(), "rl-num"))
-
             n_rows_rl = len(df_rincian_luar)
             if "INVOICE" in df_rincian_luar.columns and n_rows_rl > 0:
                 grp_size_rl = df_rincian_luar.groupby("INVOICE")["INVOICE"].transform("size").tolist()
@@ -2250,29 +2223,67 @@ with tab2b:
                 grp_size_rl = [1] * n_rows_rl
                 is_first_rl = [True] * n_rows_rl
 
-            omzet_inv_vals = df_rincian_luar["Total Omzet per Invoice"].tolist() if "Total Omzet per Invoice" in df_rincian_luar.columns else None
-            laba_inv_vals  = df_rincian_luar["Total Laba per Invoice"].tolist()  if "Total Laba per Invoice"  in df_rincian_luar.columns else None
+            # kolom_spec: tiap kolom "text" (tampil apa adanya di setiap baris) atau
+            # "merge" (digabung/rowspan mengikuti kelompok Invoice -- rata tengah,
+            # tebal, tanpa garis dalam, sama seperti Total Omzet/Laba per Invoice).
+            kolom_spec = []
+            if "TANGGAL" in df_rincian_luar.columns:
+                if "Tanggal_Lengkap" in df_rincian_luar.columns:
+                    _tgl_fmt = df_rincian_luar["Tanggal_Lengkap"].dt.strftime("%d/%m/%Y")
+                    _vals = _tgl_fmt.where(_tgl_fmt.notna(), df_rincian_luar["TANGGAL"]).fillna("")
+                else:
+                    _vals = df_rincian_luar["TANGGAL"].fillna("")
+                kolom_spec.append({"label": "Tanggal", "kind": "text", "css": "", "vals": _vals.tolist()})
+            if "TANGGAL NOTA BALIK" in df_rincian_luar.columns:
+                if "Tanggal_Nota_Balik" in df_rincian_luar.columns:
+                    _tnb_fmt = df_rincian_luar["Tanggal_Nota_Balik"].dt.strftime("%d/%m/%Y")
+                    _vals = _tnb_fmt.where(_tnb_fmt.notna(), df_rincian_luar["TANGGAL NOTA BALIK"]).fillna("")
+                else:
+                    _vals = df_rincian_luar["TANGGAL NOTA BALIK"].fillna("")
+                kolom_spec.append({"label": "Tanggal Nota Balik", "kind": "text", "css": "", "vals": _vals.tolist()})
+            if "INVOICE" in df_rincian_luar.columns:
+                kolom_spec.append({
+                    "label": "Invoice", "kind": "merge", "css": "",
+                    "vals": df_rincian_luar["INVOICE"].fillna("").tolist(), "fmt": lambda x: x,
+                })
+            if NAMA_COL_LUAR in df_rincian_luar.columns:
+                kolom_spec.append({"label": "Nama Pelanggan", "kind": "text", "css": "", "vals": df_rincian_luar[NAMA_COL_LUAR].fillna("").tolist()})
+            if GRADE_COL_LUAR in df_rincian_luar.columns:
+                kolom_spec.append({"label": "Grade", "kind": "text", "css": "", "vals": df_rincian_luar[GRADE_COL_LUAR].fillna("").tolist()})
+            if KG_COL_LUAR in df_rincian_luar.columns:
+                kolom_spec.append({"label": "Tonnase Nota Balik", "kind": "text", "css": "rl-num", "vals": _fmt_blank(df_rincian_luar[KG_COL_LUAR], lambda x: f"{x:,.1f} KG").tolist()})
+            if "Total harga" in df_rincian_luar.columns:
+                kolom_spec.append({"label": "Omzet", "kind": "text", "css": "rl-num", "vals": _fmt_blank(df_rincian_luar["Total harga"], rp).tolist()})
+            if "Keuntungan" in df_rincian_luar.columns:
+                kolom_spec.append({"label": "Laba", "kind": "text", "css": "rl-num", "vals": _fmt_blank(df_rincian_luar["Keuntungan"], rp).tolist()})
+            if "Total Omzet per Invoice" in df_rincian_luar.columns:
+                kolom_spec.append({
+                    "label": "Total Omzet per Invoice", "kind": "merge", "css": "",
+                    "vals": df_rincian_luar["Total Omzet per Invoice"].tolist(),
+                    "fmt": lambda x: (rp(x) if pd.notna(x) else ""),
+                })
+            if "Total Laba per Invoice" in df_rincian_luar.columns:
+                kolom_spec.append({
+                    "label": "Total Laba per Invoice", "kind": "merge", "css": "",
+                    "vals": df_rincian_luar["Total Laba per Invoice"].tolist(),
+                    "fmt": lambda x: (rp(x) if pd.notna(x) else ""),
+                })
 
-            header_html = "".join(f"<th>{_esc(lbl)}</th>" for lbl, _, _ in kolom_biasa)
-            if omzet_inv_vals is not None:
-                header_html += "<th>Total Omzet per Invoice</th>"
-            if laba_inv_vals is not None:
-                header_html += "<th>Total Laba per Invoice</th>"
+            header_html = "".join(f"<th>{_esc(k['label'])}</th>" for k in kolom_spec)
 
             body_rows_html = []
             for i in range(n_rows_rl):
-                cells = "".join(
-                    (f'<td class="{cls}">{_esc(vals[i])}</td>' if cls else f"<td>{_esc(vals[i])}</td>")
-                    for _, vals, cls in kolom_biasa
-                )
-                if is_first_rl[i]:
-                    if omzet_inv_vals is not None:
-                        v = rp(omzet_inv_vals[i]) if pd.notna(omzet_inv_vals[i]) else ""
-                        cells += f'<td class="rl-merge" rowspan="{grp_size_rl[i]}">{_esc(v)}</td>'
-                    if laba_inv_vals is not None:
-                        v = rp(laba_inv_vals[i]) if pd.notna(laba_inv_vals[i]) else ""
-                        cells += f'<td class="rl-merge" rowspan="{grp_size_rl[i]}">{_esc(v)}</td>'
-                body_rows_html.append(f"<tr>{cells}</tr>")
+                cells = []
+                for k in kolom_spec:
+                    if k["kind"] == "text":
+                        cls = k["css"]
+                        cells.append(f'<td class="{cls}">{_esc(k["vals"][i])}</td>' if cls else f"<td>{_esc(k['vals'][i])}</td>")
+                    elif is_first_rl[i]:
+                        raw = k["vals"][i]
+                        disp = k["fmt"](raw) if k.get("fmt") else raw
+                        cells.append(f'<td class="rl-merge" rowspan="{grp_size_rl[i]}">{_esc(disp)}</td>')
+                    # baris bukan-pertama dalam kelompok: sel merge dilewati (sudah tercakup rowspan)
+                body_rows_html.append(f"<tr>{''.join(cells)}</tr>")
 
             rincian_html = f"""<style>
 .rl-wrap {{ max-height: 620px; overflow: auto; border: 1px solid #e0e6f0; border-radius: 8px; }}
@@ -2295,18 +2306,9 @@ with tab2b:
         if has_kg_luar:
             df_ton_all_luar = df_penjualan_luar.copy()
             df_ton_all_luar[KG_COL_LUAR] = to_number(df_ton_all_luar[KG_COL_LUAR])
-            if "Is_Dibuang" in df_ton_all_luar.columns:
-                total_kg_terjual_luar = df_ton_all_luar[df_ton_all_luar["Is_Dibuang"] == False][KG_COL_LUAR].sum()
-                total_kg_dibuang_luar = df_ton_all_luar[df_ton_all_luar["Is_Dibuang"] == True][KG_COL_LUAR].sum()
-            else:
-                total_kg_terjual_luar = df_ton_all_luar[KG_COL_LUAR].sum()
-                total_kg_dibuang_luar = 0
-            total_kg_semua_luar = df_ton_all_luar[KG_COL_LUAR].sum()
+            total_kg_terjual_luar = df_ton_all_luar[KG_COL_LUAR].sum()
 
-            tonl1, tonl2, tonl3 = st.columns(3)
-            tonl1.metric("⚖️ Total Tonnase Terjual", f"{total_kg_terjual_luar:,.1f} KG")
-            tonl2.metric("🗑️ Total Tonnase Dibuang", f"{total_kg_dibuang_luar:,.1f} KG")
-            tonl3.metric("📦 Total Tonnase Keseluruhan", f"{total_kg_semua_luar:,.1f} KG")
+            st.metric("⚖️ Total Tonnase Terjual", f"{total_kg_terjual_luar:,.1f} KG")
             st.divider()
 
         section_heading("📊 Omzet & Profit per Pelanggan")
