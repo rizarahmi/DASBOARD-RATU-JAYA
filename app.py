@@ -961,6 +961,7 @@ def load_stok_gudang() -> pd.DataFrame:
     col_nopol          = _get_col(8,  ["nopol", "no polisi", "plat nomor"])
     col_jenis          = _get_col(10, ["jenis", "jenis tanaman", "nama barang", "produk", "komoditas"])
     col_grade          = _get_col(11, ["grade", "kelas", "mutu"])
+    col_tonnase_lahan  = _get_col(12, ["tonnase lahan", "tonase lahan"])
     col_jumlah_grading = _get_col(13, ["jumlah grading", "jumlah_grading"])
     col_stok           = _get_col(19, ["stok gudang", "stok"])
     col_harga_beli     = _find_name_only(["harga beli"])
@@ -983,6 +984,8 @@ def load_stok_gudang() -> pd.DataFrame:
         rename_map[col_jenis] = "JENIS"
     if col_grade and col_grade != "GRADE":
         rename_map[col_grade] = "GRADE"
+    if col_tonnase_lahan and col_tonnase_lahan != "TONNASE LAHAN":
+        rename_map[col_tonnase_lahan] = "TONNASE LAHAN"
     if col_jumlah_grading and col_jumlah_grading != "JUMLAH GRADING":
         rename_map[col_jumlah_grading] = "JUMLAH GRADING"
     if col_stok and col_stok != "STOK GUDANG":
@@ -996,6 +999,8 @@ def load_stok_gudang() -> pd.DataFrame:
 
     if "STOK GUDANG" in df.columns:
         df["STOK GUDANG"] = to_number(df["STOK GUDANG"])
+    if "TONNASE LAHAN" in df.columns:
+        df["TONNASE LAHAN"] = to_number(df["TONNASE LAHAN"])
     if "JUMLAH GRADING" in df.columns:
         df["JUMLAH GRADING"] = to_number(df["JUMLAH GRADING"])
     if "HARGA BELI" in df.columns:
@@ -1563,6 +1568,13 @@ with tab2:
             elif "JUMLAH GRADING" in df_cbs.columns:
                 df_cbs["Stock Grading (KG)"] = df_cbs["JUMLAH GRADING"]
 
+            # Tonnase Lahan: sheet STOK GUDANG kolom M, dicocokkan Invoice + Jenis +
+            # Grade yang sama juga -- dipakai untuk mengalikan Harga Beli/Harga Modal.
+            if "TONNASE LAHAN" in df_cbs.columns and "JENIS" in df_cbs.columns and "GRADE" in df_cbs.columns:
+                df_cbs["_tonnase_lahan"] = df_cbs.groupby(["JENIS", "GRADE"])["TONNASE LAHAN"].transform(lambda s: s.sum(min_count=1))
+            elif "TONNASE LAHAN" in df_cbs.columns:
+                df_cbs["_tonnase_lahan"] = df_cbs["TONNASE LAHAN"]
+
             # Stock Terjual (KG) / Total Pendapatan (Rp) / Keuntungan Bersih (Rp): sheet
             # PENJUALAN LAPAK kolom P/S/T, dicocokkan ke Invoice (kolom F) + Jenis (N) +
             # Grade (O) yang sama. Sengaja pakai data semua tanggal (bukan df_penjualan
@@ -1589,11 +1601,11 @@ with tab2:
                     df_cbs[_c] = df_cbs[_c].fillna(0)
 
             # Harga Beli & Harga Modal di sheet STOK GUDANG adalah harga per KG --
-            # dikalikan Stock Grading (KG) supaya jadi nilai total yang ditampilkan.
-            if "HARGA BELI" in df_cbs.columns and "Stock Grading (KG)" in df_cbs.columns:
-                df_cbs["Harga Beli"] = df_cbs["HARGA BELI"] * df_cbs["Stock Grading (KG)"]
-            if "HARGA MODAL" in df_cbs.columns and "Stock Grading (KG)" in df_cbs.columns:
-                df_cbs["Harga Modal"] = df_cbs["HARGA MODAL"] * df_cbs["Stock Grading (KG)"]
+            # dikalikan Tonnase Lahan (bukan Stock Grading) supaya jadi nilai total.
+            if "HARGA BELI" in df_cbs.columns and "_tonnase_lahan" in df_cbs.columns:
+                df_cbs["Harga Beli"] = df_cbs["HARGA BELI"] * df_cbs["_tonnase_lahan"]
+            if "HARGA MODAL" in df_cbs.columns and "_tonnase_lahan" in df_cbs.columns:
+                df_cbs["Harga Modal"] = df_cbs["HARGA MODAL"] * df_cbs["_tonnase_lahan"]
 
             kolom_cbs = [
                 ("JENIS", "Jenis", "txt"),
@@ -1660,7 +1672,7 @@ with tab2:
 <tbody>{"".join(body_rows_cbs)}</tbody>
 </table></div>"""
                 st.markdown(cbs_html, unsafe_allow_html=True)
-                caption_cbs = f"📌 {len(df_cbs)} baris untuk Invoice {sel_invoice_cbs}. Stock Terjual (KG), Total Pendapatan (Rp), dan Keuntungan Bersih (Rp) dicocokkan ke sheet PENJUALAN LAPAK berdasarkan Invoice + Jenis + Grade yang sama (bukan dibatasi filter tanggal sidebar). Stock Grading (KG) dari sheet STOK GUDANG kolom 'Jumlah Grading', dicocokkan Jenis + Grade dalam invoice ini. Harga Beli & Harga Modal = harga per KG di STOK GUDANG dikali Stock Grading (KG)."
+                caption_cbs = f"📌 {len(df_cbs)} baris untuk Invoice {sel_invoice_cbs}. Stock Terjual (KG), Total Pendapatan (Rp), dan Keuntungan Bersih (Rp) dicocokkan ke sheet PENJUALAN LAPAK berdasarkan Invoice + Jenis + Grade yang sama (bukan dibatasi filter tanggal sidebar). Stock Grading (KG) dari sheet STOK GUDANG kolom 'Jumlah Grading', dicocokkan Jenis + Grade dalam invoice ini. Harga Beli & Harga Modal = harga per KG di STOK GUDANG dikali Tonnase Lahan (kolom M), juga dicocokkan Jenis + Grade."
                 if kolom_cbs_hilang:
                     caption_cbs += f" Kolom belum ketemu (tidak ditampilkan): {', '.join(kolom_cbs_hilang)}."
                 st.caption(caption_cbs)
