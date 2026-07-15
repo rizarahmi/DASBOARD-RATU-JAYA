@@ -1522,6 +1522,21 @@ with tab2:
             sel_invoice_cbs = st.selectbox("Invoice", invoice_opts_cbs, key="tab2_cbs_invoice")
             df_cbs = df_stok_gudang_raw[df_stok_gudang_raw["INVOICE"].astype(str) == sel_invoice_cbs].copy()
 
+            # Tanggal/Nopol/Penimbang/Asal Barang/Lokasi ditampilkan sekali di luar
+            # tabel (dianggap sama untuk 1 invoice), bukan diulang di tiap baris grade.
+            info_fields_cbs = []
+            for src, lbl_info in [
+                ("TANGGAL", "📅 Tanggal"), ("NOPOL", "🚚 Nopol"), ("PENIMBANG", "⚖️ Penimbang"),
+                ("ASAL BARANG", "📦 Asal Barang"), ("LOKASI", "📍 Lokasi"),
+            ]:
+                if src in df_cbs.columns:
+                    _val = df_cbs[src].iloc[0] if not df_cbs.empty else None
+                    info_fields_cbs.append((lbl_info, str(_val) if is_filled(_val) else "-"))
+            if info_fields_cbs:
+                info_cols_cbs = st.columns(len(info_fields_cbs))
+                for _col, (lbl_info, val_info) in zip(info_cols_cbs, info_fields_cbs):
+                    _col.metric(lbl_info, val_info)
+
             # Stock Terjual / Total Pendapatan / Keuntungan Bersih diambil dari sheet
             # PENJUALAN LAPAK, dicocokkan berdasarkan GRADE yang sama, mengikuti filter
             # rentang tanggal di sidebar (konsisten dengan bagian lain dashboard).
@@ -1542,11 +1557,6 @@ with tab2:
                     df_cbs[_c] = df_cbs[_c].fillna(0)
 
             kolom_cbs = [
-                ("TANGGAL", "Tanggal", "txt"),
-                ("NOPOL", "Nopol", "txt"),
-                ("PENIMBANG", "Penimbang", "txt"),
-                ("ASAL BARANG", "Asal Barang", "txt"),
-                ("LOKASI", "Lokasi", "txt"),
                 ("JENIS", "Jenis", "txt"),
                 ("GRADE", "Grade", "txt"),
                 ("Stock Terjual (KG)", "Stock Terjual (KG)", "num"),
