@@ -2208,38 +2208,87 @@ with tab2b:
             def _fmt_blank(series, formatter):
                 return series.apply(lambda x: formatter(x) if pd.notna(x) else "")
 
-            df_tampil_luar = pd.DataFrame(index=df_rincian_luar.index)
+            def _esc(x):
+                s = "" if x is None else str(x)
+                return (s.replace("&", "&amp;").replace("<", "&lt;")
+                         .replace(">", "&gt;").replace('"', "&quot;"))
+
+            # kolom biasa: (label, list nilai per baris, kelas css opsional)
+            kolom_biasa = []
             if "TANGGAL" in df_rincian_luar.columns:
                 if "Tanggal_Lengkap" in df_rincian_luar.columns:
                     _tgl_fmt = df_rincian_luar["Tanggal_Lengkap"].dt.strftime("%d/%m/%Y")
-                    df_tampil_luar["Tanggal"] = _tgl_fmt.where(_tgl_fmt.notna(), df_rincian_luar["TANGGAL"]).fillna("")
+                    _vals = _tgl_fmt.where(_tgl_fmt.notna(), df_rincian_luar["TANGGAL"]).fillna("")
                 else:
-                    df_tampil_luar["Tanggal"] = df_rincian_luar["TANGGAL"].fillna("")
+                    _vals = df_rincian_luar["TANGGAL"].fillna("")
+                kolom_biasa.append(("Tanggal", _vals.tolist(), ""))
             if "TANGGAL NOTA BALIK" in df_rincian_luar.columns:
                 if "Tanggal_Nota_Balik" in df_rincian_luar.columns:
                     _tnb_fmt = df_rincian_luar["Tanggal_Nota_Balik"].dt.strftime("%d/%m/%Y")
-                    df_tampil_luar["Tanggal Nota Balik"] = _tnb_fmt.where(_tnb_fmt.notna(), df_rincian_luar["TANGGAL NOTA BALIK"]).fillna("")
+                    _vals = _tnb_fmt.where(_tnb_fmt.notna(), df_rincian_luar["TANGGAL NOTA BALIK"]).fillna("")
                 else:
-                    df_tampil_luar["Tanggal Nota Balik"] = df_rincian_luar["TANGGAL NOTA BALIK"].fillna("")
+                    _vals = df_rincian_luar["TANGGAL NOTA BALIK"].fillna("")
+                kolom_biasa.append(("Tanggal Nota Balik", _vals.tolist(), ""))
             if "INVOICE" in df_rincian_luar.columns:
-                df_tampil_luar["Invoice"] = df_rincian_luar["INVOICE"].fillna("")
+                kolom_biasa.append(("Invoice", df_rincian_luar["INVOICE"].fillna("").tolist(), ""))
             if NAMA_COL_LUAR in df_rincian_luar.columns:
-                df_tampil_luar["Nama Pelanggan"] = df_rincian_luar[NAMA_COL_LUAR].fillna("")
+                kolom_biasa.append(("Nama Pelanggan", df_rincian_luar[NAMA_COL_LUAR].fillna("").tolist(), ""))
             if GRADE_COL_LUAR in df_rincian_luar.columns:
-                df_tampil_luar["Grade"] = df_rincian_luar[GRADE_COL_LUAR].fillna("")
+                kolom_biasa.append(("Grade", df_rincian_luar[GRADE_COL_LUAR].fillna("").tolist(), ""))
             if KG_COL_LUAR in df_rincian_luar.columns:
-                df_tampil_luar["Tonnase Nota Balik"] = _fmt_blank(df_rincian_luar[KG_COL_LUAR], lambda x: f"{x:,.1f} KG")
+                kolom_biasa.append(("Tonnase Nota Balik", _fmt_blank(df_rincian_luar[KG_COL_LUAR], lambda x: f"{x:,.1f} KG").tolist(), "rl-num"))
             if "Total harga" in df_rincian_luar.columns:
-                df_tampil_luar["Omzet"] = _fmt_blank(df_rincian_luar["Total harga"], rp)
+                kolom_biasa.append(("Omzet", _fmt_blank(df_rincian_luar["Total harga"], rp).tolist(), "rl-num"))
             if "Keuntungan" in df_rincian_luar.columns:
-                df_tampil_luar["Laba"] = _fmt_blank(df_rincian_luar["Keuntungan"], rp)
-            if "Total Omzet per Invoice" in df_rincian_luar.columns:
-                df_tampil_luar["Total Omzet per Invoice"] = _fmt_blank(df_rincian_luar["Total Omzet per Invoice"], rp)
-            if "Total Laba per Invoice" in df_rincian_luar.columns:
-                df_tampil_luar["Total Laba per Invoice"] = _fmt_blank(df_rincian_luar["Total Laba per Invoice"], rp)
+                kolom_biasa.append(("Laba", _fmt_blank(df_rincian_luar["Keuntungan"], rp).tolist(), "rl-num"))
 
-            st.dataframe(df_tampil_luar, use_container_width=True, hide_index=True)
-            st.caption(f"📌 {len(df_tampil_luar)} baris · diurutkan dari Invoice paling akhir ke paling awal. Kolom 'Total Omzet/Laba per Invoice' di paling kanan, cuma tampil sekali di baris pertama tiap invoice (baris grade lain di invoice yang sama dikosongkan). Sel yang datanya belum ada di sheet dibiarkan kosong.")
+            n_rows_rl = len(df_rincian_luar)
+            if "INVOICE" in df_rincian_luar.columns and n_rows_rl > 0:
+                grp_size_rl = df_rincian_luar.groupby("INVOICE")["INVOICE"].transform("size").tolist()
+                is_first_rl = (df_rincian_luar["INVOICE"] != df_rincian_luar["INVOICE"].shift(1)).tolist()
+            else:
+                grp_size_rl = [1] * n_rows_rl
+                is_first_rl = [True] * n_rows_rl
+
+            omzet_inv_vals = df_rincian_luar["Total Omzet per Invoice"].tolist() if "Total Omzet per Invoice" in df_rincian_luar.columns else None
+            laba_inv_vals  = df_rincian_luar["Total Laba per Invoice"].tolist()  if "Total Laba per Invoice"  in df_rincian_luar.columns else None
+
+            header_html = "".join(f"<th>{_esc(lbl)}</th>" for lbl, _, _ in kolom_biasa)
+            if omzet_inv_vals is not None:
+                header_html += "<th>Total Omzet per Invoice</th>"
+            if laba_inv_vals is not None:
+                header_html += "<th>Total Laba per Invoice</th>"
+
+            body_rows_html = []
+            for i in range(n_rows_rl):
+                cells = "".join(
+                    (f'<td class="{cls}">{_esc(vals[i])}</td>' if cls else f"<td>{_esc(vals[i])}</td>")
+                    for _, vals, cls in kolom_biasa
+                )
+                if is_first_rl[i]:
+                    if omzet_inv_vals is not None:
+                        v = rp(omzet_inv_vals[i]) if pd.notna(omzet_inv_vals[i]) else ""
+                        cells += f'<td class="rl-merge" rowspan="{grp_size_rl[i]}">{_esc(v)}</td>'
+                    if laba_inv_vals is not None:
+                        v = rp(laba_inv_vals[i]) if pd.notna(laba_inv_vals[i]) else ""
+                        cells += f'<td class="rl-merge" rowspan="{grp_size_rl[i]}">{_esc(v)}</td>'
+                body_rows_html.append(f"<tr>{cells}</tr>")
+
+            rincian_html = f"""<style>
+.rl-wrap {{ max-height: 620px; overflow: auto; border: 1px solid #e0e6f0; border-radius: 8px; }}
+.rl-table {{ width: 100%; border-collapse: collapse; font-size: 13.5px; }}
+.rl-table th {{ position: sticky; top: 0; background: #1f3864; color: #fff; padding: 9px 10px; text-align: left; white-space: nowrap; z-index: 1; }}
+.rl-table td {{ padding: 8px 10px; border-bottom: 1px solid #eef1f6; white-space: nowrap; }}
+.rl-table tbody tr:hover td {{ background: #f8f9fa; }}
+.rl-table td.rl-num {{ text-align: right; }}
+.rl-table td.rl-merge {{ text-align: center; vertical-align: middle; font-weight: 800; color: #1f3864; border-left: 1px solid #e0e6f0; background: #f4f7fc; }}
+</style>
+<div class="rl-wrap"><table class="rl-table">
+<thead><tr>{header_html}</tr></thead>
+<tbody>{"".join(body_rows_html)}</tbody>
+</table></div>"""
+            st.markdown(rincian_html, unsafe_allow_html=True)
+            st.caption(f"📌 {n_rows_rl} baris · diurutkan dari Invoice paling akhir ke paling awal. Total Omzet/Laba per Invoice digabung jadi satu sel per invoice (tengah, tebal, tanpa garis pemisah di dalamnya). Sel yang datanya belum ada di sheet dibiarkan kosong.")
 
         st.divider()
 
@@ -2326,54 +2375,6 @@ with tab2b:
 
         st.divider()
 
-        if has_kg_luar and has_nama_luar and "Is_Dibuang" in df_penjualan_luar.columns:
-            section_heading("⚖️ Tonnase Terjual vs Dibuang per Pelanggan")
-            df_ton_work_luar = df_penjualan_luar.copy()
-            df_ton_work_luar[KG_COL_LUAR] = to_number(df_ton_work_luar[KG_COL_LUAR])
-            ton_grp_luar = df_ton_work_luar.groupby([NAMA_COL_LUAR, "Is_Dibuang"])[KG_COL_LUAR].sum().reset_index()
-            pivot_ton_luar = ton_grp_luar.pivot(index=NAMA_COL_LUAR, columns="Is_Dibuang", values=KG_COL_LUAR).fillna(0).reset_index()
-            pivot_ton_luar = pivot_ton_luar.rename(columns={False: "Terjual (KG)", True: "Dibuang (KG)"})
-            for cn in ["Terjual (KG)", "Dibuang (KG)"]:
-                if cn not in pivot_ton_luar.columns:
-                    pivot_ton_luar[cn] = 0
-
-            pivot_ton_luar["Total_KG"] = pivot_ton_luar["Terjual (KG)"] + pivot_ton_luar["Dibuang (KG)"]
-            pivot_ton_luar["%_Dibuang"] = pivot_ton_luar.apply(
-                lambda r: (r["Dibuang (KG)"] / r["Total_KG"] * 100) if r["Total_KG"] > 0 else 0, axis=1
-            )
-
-            fig_ton_luar = go.Figure()
-            fig_ton_luar.add_trace(go.Bar(
-                name="Terjual (KG)", x=pivot_ton_luar[NAMA_COL_LUAR], y=pivot_ton_luar["Terjual (KG)"],
-                marker_color="#2ca02c",
-                text=[f"{v:,.1f} kg" for v in pivot_ton_luar["Terjual (KG)"]],
-                textposition="outside", textfont=dict(size=12)
-            ))
-            fig_ton_luar.add_trace(go.Bar(
-                name="Dibuang (KG)", x=pivot_ton_luar[NAMA_COL_LUAR], y=pivot_ton_luar["Dibuang (KG)"],
-                marker_color="#ff7f0e",
-                text=[f"{v:,.1f} kg" for v in pivot_ton_luar["Dibuang (KG)"]],
-                textposition="outside", textfont=dict(size=12)
-            ))
-            fig_ton_luar.update_layout(
-                barmode="group", title="Perbandingan Tonnase Terjual vs Dibuang",
-                yaxis_title="Kilogram (KG)", xaxis_title="Nama Pelanggan", xaxis_tickangle=-30
-            )
-            pad_yaxis(fig_ton_luar, max(pivot_ton_luar["Terjual (KG)"].max(), pivot_ton_luar["Dibuang (KG)"].max()) if not pivot_ton_luar.empty else 0)
-            st.plotly_chart(fig_ton_luar, use_container_width=True)
-
-            tabel_ton_luar = pivot_ton_luar.copy()
-            tabel_ton_luar["Terjual (KG)"] = pivot_ton_luar["Terjual (KG)"].apply(lambda x: f"{x:,.1f} KG")
-            tabel_ton_luar["Dibuang (KG)"] = pivot_ton_luar["Dibuang (KG)"].apply(lambda x: f"{x:,.1f} KG")
-            tabel_ton_luar["Total KG"]      = pivot_ton_luar["Total_KG"].apply(lambda x: f"{x:,.1f} KG")
-            tabel_ton_luar["% Dibuang"]     = pivot_ton_luar["%_Dibuang"].apply(lambda x: f"{x:.1f}%")
-            tabel_ton_luar = tabel_ton_luar.rename(columns={NAMA_COL_LUAR: "Nama Pelanggan"})
-            st.dataframe(
-                tabel_ton_luar[["Nama Pelanggan", "Terjual (KG)", "Dibuang (KG)", "Total KG", "% Dibuang"]],
-                use_container_width=True, hide_index=True
-            )
-            st.divider()
-
         if has_tunai_luar and has_kredit_luar and has_nama_luar:
             section_heading("💳 Pembayaran Tunai vs Kredit per Pelanggan")
             pay_grp_luar = df_penjualan_luar.groupby(NAMA_COL_LUAR).agg(
@@ -2399,59 +2400,6 @@ with tab2b:
             )
             pad_yaxis(fig_pay_luar, max(pay_grp_luar["Tunai"].max(), pay_grp_luar["Kredit"].max()) if not pay_grp_luar.empty else 0)
             st.plotly_chart(fig_pay_luar, use_container_width=True)
-            st.divider()
-
-        if has_grade_luar and has_kg_luar:
-            section_heading("📊 Tonnase Terjual Berdasarkan Grade")
-            df_grade_work_luar = df_penjualan_luar.copy()
-            df_grade_work_luar[KG_COL_LUAR] = to_number(df_grade_work_luar[KG_COL_LUAR])
-            df_grade_valid_luar = df_grade_work_luar[
-                df_grade_work_luar[KG_COL_LUAR].notna() & df_grade_work_luar[GRADE_COL_LUAR].apply(is_filled)
-            ]
-
-            agg_grade_luar = {"Total_KG": (KG_COL_LUAR, "sum")}
-            if "Total harga" in df_grade_valid_luar.columns:
-                agg_grade_luar["Omzet"] = ("Total harga", "sum")
-            if "Keuntungan" in df_grade_valid_luar.columns:
-                agg_grade_luar["Laba"] = ("Keuntungan", "sum")
-            grade_grp_luar = df_grade_valid_luar.groupby(GRADE_COL_LUAR).agg(**agg_grade_luar).reset_index().sort_values("Total_KG", ascending=False)
-
-            gl1, gl2 = st.columns(2)
-            with gl1:
-                fig_grade_bar_luar = go.Figure()
-                fig_grade_bar_luar.add_trace(go.Bar(
-                    x=grade_grp_luar[GRADE_COL_LUAR],
-                    y=grade_grp_luar["Total_KG"],
-                    text=[f"{v:,.1f} KG" for v in grade_grp_luar["Total_KG"]],
-                    textposition="outside",
-                    textfont=dict(size=12),
-                    marker_color="#1f77b4"
-                ))
-                fig_grade_bar_luar.update_layout(
-                    title="Total KG per Grade",
-                    xaxis_title="Grade", yaxis_title="Kilogram (KG)", showlegend=False
-                )
-                pad_yaxis(fig_grade_bar_luar, grade_grp_luar["Total_KG"].max() if not grade_grp_luar.empty else 0)
-                st.plotly_chart(fig_grade_bar_luar, use_container_width=True)
-
-            with gl2:
-                fig_grade_pie_luar = px.pie(
-                    grade_grp_luar, names=GRADE_COL_LUAR, values="Total_KG",
-                    title="Proporsi KG per Grade", hole=0.4
-                )
-                fig_grade_pie_luar.update_traces(textinfo="label+percent", textfont_size=13)
-                st.plotly_chart(fig_grade_pie_luar, use_container_width=True)
-
-            grade_display_luar = grade_grp_luar.copy()
-            grade_display_luar["Total_KG"] = grade_display_luar["Total_KG"].apply(lambda x: f"{x:,.1f} KG")
-            disp_cols_luar = [GRADE_COL_LUAR, "Total_KG"]
-            if "Omzet" in grade_display_luar.columns:
-                grade_display_luar["Omzet"] = grade_grp_luar["Omzet"].apply(rp)
-                disp_cols_luar.append("Omzet")
-            if "Laba" in grade_display_luar.columns:
-                grade_display_luar["Laba"] = grade_grp_luar["Laba"].apply(rp)
-                disp_cols_luar.append("Laba")
-            st.dataframe(grade_display_luar[disp_cols_luar], use_container_width=True, hide_index=True)
             st.divider()
 
         if has_jenis_luar and has_kg_luar:
