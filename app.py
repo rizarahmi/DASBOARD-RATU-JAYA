@@ -1618,7 +1618,6 @@ with tab2:
                 ("Harga Modal", "Harga Modal", "rp"),
             ]
             kolom_cbs_ada = [(src, lbl, tp) for src, lbl, tp in kolom_cbs if src in df_cbs.columns]
-            kolom_cbs_hilang = [lbl for src, lbl, tp in kolom_cbs if src not in df_cbs.columns]
 
             if not kolom_cbs_ada:
                 st.info("Kolom untuk rekap Close Barang Selesai tidak ditemukan di sheet STOK GUDANG.")
@@ -1672,10 +1671,6 @@ with tab2:
 <tbody>{"".join(body_rows_cbs)}</tbody>
 </table></div>"""
                 st.markdown(cbs_html, unsafe_allow_html=True)
-                caption_cbs = f"📌 {len(df_cbs)} baris untuk Invoice {sel_invoice_cbs}. Stock Terjual (KG), Total Pendapatan (Rp), dan Keuntungan Bersih (Rp) dicocokkan ke sheet PENJUALAN LAPAK berdasarkan Invoice + Jenis + Grade yang sama (bukan dibatasi filter tanggal sidebar). Stock Grading (KG) dari sheet STOK GUDANG kolom 'Jumlah Grading', dicocokkan Jenis + Grade dalam invoice ini. Harga Beli & Harga Modal = harga per KG di STOK GUDANG dikali Tonnase Lahan (kolom M), juga dicocokkan Jenis + Grade."
-                if kolom_cbs_hilang:
-                    caption_cbs += f" Kolom belum ketemu (tidak ditampilkan): {', '.join(kolom_cbs_hilang)}."
-                st.caption(caption_cbs)
 
     st.divider()
 
@@ -2503,7 +2498,6 @@ with tab2b:
 <tbody>{"".join(body_rows_html)}</tbody>
 </table></div>"""
             st.markdown(rincian_html, unsafe_allow_html=True)
-            st.caption(f"📌 {n_rows_rl} baris · diurutkan dari Invoice paling akhir ke paling awal. Total Omzet/Laba per Invoice digabung jadi satu sel per invoice (tengah, tebal, tanpa garis pemisah di dalamnya). Sel yang datanya belum ada di sheet dibiarkan kosong.")
 
         st.divider()
 
