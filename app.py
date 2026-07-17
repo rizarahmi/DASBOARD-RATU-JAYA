@@ -138,6 +138,7 @@ SHEET_KERUGIAN_GUDANG = "KERUGIAN GUDANG"
 SHEET_HUTANG_PAKE_TANI = "HUTANG PAK'E TANI"
 SHEET_STOK_LAPAK      = "STOK LAPAK"
 SHEET_STOK_GUDANG     = "STOK GUDANG"
+SHEET_BARANG_MASUK    = "BARANG_MASUK"
 
 GH_SPREADSHEET_ID  = "17MhBomkR5qaLs0tOu6CO4H1pDTn1BV6_7hxOrvcVWSE"
 SHEET_GH_BAHAN     = "BAHAN"
@@ -442,6 +443,10 @@ def load_penjualan_lapak() -> pd.DataFrame:
     # jadi kosong untuk SEMUA baris, dan filter tanggal di sidebar otomatis
     # membuang semua data (itu sebabnya Omzet/Laba/Tunai/Kredit Lapak kebaca 0).
     col_tanggal = _get_col_by_pos_or_name(0, ["tanggal", "tgl", "date", "timestamp"])
+    # Kolom B = nama Gudang asal penjualan, dipakai untuk mencocokkan Terjual/
+    # Pendapatan Gudang di Rincian per Invoice. Nama internal unik supaya tidak
+    # bentrok kalau kebetulan ada kolom lain yang juga bernama umum.
+    col_gudang_asal = _col_at(1)
     col_jenis   = _get_col_by_pos_or_name(13, ["jenis", "jenis tanaman", "nama barang", "produk", "komoditas"])
     col_grade   = _get_col_by_pos_or_name(14, ["grade", "kelas", "mutu"])
     col_kg      = _get_col_by_pos_or_name(15, ["jumlah (kg)", "jumlah kg", "kg", "jumlah", "berat"])
@@ -459,6 +464,8 @@ def load_penjualan_lapak() -> pd.DataFrame:
     rename_map = {}
     if col_tanggal and col_tanggal != "TANGGAL":
         rename_map[col_tanggal] = "TANGGAL"
+    if col_gudang_asal and col_gudang_asal != "_PL_GUDANG_ASAL":
+        rename_map[col_gudang_asal] = "_PL_GUDANG_ASAL"
     if col_omzet and col_omzet != "Total harga":
         rename_map[col_omzet] = "Total harga"
     if col_laba and col_laba != "Keuntungan":
@@ -490,6 +497,11 @@ def load_penjualan_lapak() -> pd.DataFrame:
     for col in ["Total harga", "Keuntungan", "Tunai", "Kredit", "Jumlah (KG)"]:
         if col in df.columns:
             df[col] = to_number(df[col])
+    # Distandarkan (strip spasi) supaya pencocokan Jenis/Grade/Gudang/Kode Lapak di
+    # Rincian per Invoice tidak meleset gara-gara spasi tersembunyi.
+    for col in ["JENIS", "GRADE", "_PL_GUDANG_ASAL", "KODE LAPAK"]:
+        if col in df.columns:
+            df[col] = df[col].astype(str).str.strip()
 
     df = _parse_tanggal(df)
 
@@ -1076,6 +1088,145 @@ def load_stok_gudang() -> pd.DataFrame:
 
     return df
 
+@st.cache_data(ttl=300, show_spinner="Memuat Barang Masuk...")
+def load_barang_masuk() -> pd.DataFrame:
+    # Sheet BARANG_MASUK (spreadsheet Penjualan Lapak) -- struktur posisi kolomnya
+    # sama seperti STOK GUDANG lama, tapi HARGA BELI sekarang di posisi tetap R
+    # (dulu cuma dicari by nama).
+    df = fetch_raw_csv(SHEET_BARANG_MASUK, spreadsheet_id=PENJUALAN_LAPAK_SPREADSHEET_ID)
+    if df.empty:
+        return df
+
+    all_cols = list(df.columns)
+
+    def _get_col(idx, name_candidates):
+        for name in name_candidates:
+            matches = [c for c in all_cols if c.strip().lower() == name.lower()]
+            if matches:
+                return matches[0]
+        if idx < len(all_cols):
+            return all_cols[idx]
+        return None
+
+    col_tanggal        = _get_col(0,  ["tanggal", "tgl", "date", "timestamp"])
+    col_invoice        = _get_col(1,  ["invoice", "no invoice", "nomor invoice"])
+    col_asal           = _get_col(5,  ["asal barang", "asal"])
+    col_penimbang      = _get_col(6,  ["penimbang"])
+    col_tujuan         = _get_col(7,  ["tujuan", "kode gudang", "gudang", "lokasi"])
+    col_nopol          = _get_col(8,  ["nopol", "no polisi", "plat nomor"])
+    col_jenis          = _get_col(10, ["jenis", "jenis tanaman", "nama barang", "produk", "komoditas"])
+    col_grade          = _get_col(11, ["grade", "kelas", "mutu"])
+    col_tonnase_lahan  = _get_col(12, ["tonnase lahan", "tonase lahan"])
+    col_total_grading  = _get_col(13, ["total grading", "jumlah grading", "jumlah_grading"])
+    col_harga_beli     = _get_col(17, ["harga beli"])
+    col_stok           = _get_col(19, ["stok gudang", "stok"])
+
+    rename_map = {}
+    if col_tanggal and col_tanggal != "TANGGAL":
+        rename_map[col_tanggal] = "TANGGAL"
+    if col_invoice and col_invoice != "INVOICE":
+        rename_map[col_invoice] = "INVOICE"
+    if col_asal and col_asal != "ASAL BARANG":
+        rename_map[col_asal] = "ASAL BARANG"
+    if col_penimbang and col_penimbang != "PENIMBANG":
+        rename_map[col_penimbang] = "PENIMBANG"
+    if col_tujuan and col_tujuan != "TUJUAN":
+        rename_map[col_tujuan] = "TUJUAN"
+    if col_nopol and col_nopol != "NOPOL":
+        rename_map[col_nopol] = "NOPOL"
+    if col_jenis and col_jenis != "JENIS":
+        rename_map[col_jenis] = "JENIS"
+    if col_grade and col_grade != "GRADE":
+        rename_map[col_grade] = "GRADE"
+    if col_tonnase_lahan and col_tonnase_lahan != "TONNASE LAHAN":
+        rename_map[col_tonnase_lahan] = "TONNASE LAHAN"
+    if col_total_grading and col_total_grading != "TOTAL GRADING":
+        rename_map[col_total_grading] = "TOTAL GRADING"
+    if col_harga_beli and col_harga_beli != "HARGA BELI":
+        rename_map[col_harga_beli] = "HARGA BELI"
+    if col_stok and col_stok != "STOK GUDANG":
+        rename_map[col_stok] = "STOK GUDANG"
+    if rename_map:
+        df = df.rename(columns=rename_map)
+        df = df.loc[:, ~df.columns.duplicated()]
+
+    for col in ["TONNASE LAHAN", "TOTAL GRADING", "HARGA BELI", "STOK GUDANG"]:
+        if col in df.columns:
+            df[col] = to_number(df[col])
+    if "JENIS" in df.columns:
+        df["JENIS"] = df["JENIS"].astype(str).str.strip()
+    if "GRADE" in df.columns:
+        df["GRADE"] = df["GRADE"].astype(str).str.strip()
+    if "TUJUAN" in df.columns:
+        df = df[df["TUJUAN"].apply(is_filled)].reset_index(drop=True)
+
+    if "TANGGAL" in df.columns:
+        df["Tanggal_Lengkap"] = pd.to_datetime(df["TANGGAL"], dayfirst=True, errors="coerce")
+
+    return df
+
+@st.cache_data(ttl=300, show_spinner="Memuat Stok Lapak (Rincian per Invoice)...")
+def load_stok_lapak_invoice() -> pd.DataFrame:
+    # Versi STOK LAPAK khusus untuk Rincian per Invoice: sumbernya dari spreadsheet
+    # Penjualan Lapak (bukan spreadsheet utama) dan TIDAK dibatasi 14 hari terakhir
+    # seperti load_stok_lapak(), supaya invoice lama tetap bisa ditelusuri.
+    df = fetch_raw_csv(SHEET_STOK_LAPAK, spreadsheet_id=PENJUALAN_LAPAK_SPREADSHEET_ID)
+    if df.empty:
+        return df
+
+    all_cols = list(df.columns)
+
+    def _get_col(idx, name_candidates):
+        for name in name_candidates:
+            matches = [c for c in all_cols if c.strip().lower() == name.lower()]
+            if matches:
+                return matches[0]
+        if idx < len(all_cols):
+            return all_cols[idx]
+        return None
+
+    col_tanggal        = _get_col(0,  ["tanggal", "tgl", "date", "timestamp"])
+    col_tujuan         = _get_col(7,  ["tujuan"])          # H = Moving (Lapak tujuan)
+    col_jenis          = _get_col(10, ["jenis", "jenis tanaman", "nama barang", "produk", "komoditas"])
+    col_grade          = _get_col(11, ["grade", "kelas", "mutu"])
+    col_jumlah_moving  = _get_col(12, ["jumlah moving", "jumlah_moving"])   # M
+    col_hpp_lapak      = _get_col(18, ["hpp lapak", "hpp_lapak"])          # S
+    col_stok           = _get_col(19, ["stok lapak", "stok"])              # T
+
+    rename_map = {}
+    if col_tanggal and col_tanggal != "TANGGAL":
+        rename_map[col_tanggal] = "TANGGAL"
+    if col_tujuan and col_tujuan != "TUJUAN":
+        rename_map[col_tujuan] = "TUJUAN"
+    if col_jenis and col_jenis != "JENIS":
+        rename_map[col_jenis] = "JENIS"
+    if col_grade and col_grade != "GRADE":
+        rename_map[col_grade] = "GRADE"
+    if col_jumlah_moving and col_jumlah_moving != "JUMLAH MOVING":
+        rename_map[col_jumlah_moving] = "JUMLAH MOVING"
+    if col_hpp_lapak and col_hpp_lapak != "HPP LAPAK":
+        rename_map[col_hpp_lapak] = "HPP LAPAK"
+    if col_stok and col_stok != "STOK LAPAK":
+        rename_map[col_stok] = "STOK LAPAK"
+    if rename_map:
+        df = df.rename(columns=rename_map)
+        df = df.loc[:, ~df.columns.duplicated()]
+
+    for col in ["JUMLAH MOVING", "HPP LAPAK", "STOK LAPAK"]:
+        if col in df.columns:
+            df[col] = to_number(df[col])
+    if "JENIS" in df.columns:
+        df["JENIS"] = df["JENIS"].astype(str).str.strip()
+    if "GRADE" in df.columns:
+        df["GRADE"] = df["GRADE"].astype(str).str.strip()
+    if "TUJUAN" in df.columns:
+        df = df[df["TUJUAN"].apply(is_filled)].reset_index(drop=True)
+
+    if "TANGGAL" in df.columns:
+        df["Tanggal_Lengkap"] = pd.to_datetime(df["TANGGAL"], dayfirst=True, errors="coerce")
+
+    return df
+
 # LOADERS - GREEN HOUSE (spreadsheet terpisah)
 def _gh_find_col(all_cols, candidates):
     for cand in candidates:
@@ -1287,6 +1438,14 @@ except Exception as e:
     st.warning(f"Gagal mengambil data Stok Lapak/Stok Gudang. Detail: {e}")
     df_stok_lapak_raw  = pd.DataFrame()
     df_stok_gudang_raw = pd.DataFrame()
+
+try:
+    df_barang_masuk_raw      = load_barang_masuk()
+    df_stok_lapak_invoice_raw = load_stok_lapak_invoice()
+except Exception as e:
+    st.warning(f"Gagal mengambil data Barang Masuk/Stok Lapak (Rincian per Invoice). Detail: {e}")
+    df_barang_masuk_raw       = pd.DataFrame()
+    df_stok_lapak_invoice_raw = pd.DataFrame()
 
 # SIDEBAR - FILTER
 st.sidebar.title("⚙️ Filter Data")
@@ -1577,10 +1736,10 @@ with tab1:
 # TAB 2: ANALISA LAPAK
 with tab2:
     section_heading("🚛 Rincian per Invoice")
-    if df_stok_gudang_raw.empty or "INVOICE" not in df_stok_gudang_raw.columns:
-        st.info("Kolom 'INVOICE' tidak ditemukan di sheet STOK GUDANG (atau datanya kosong), jadi rekap Rincian per Invoice belum bisa ditampilkan.")
+    if df_barang_masuk_raw.empty or "INVOICE" not in df_barang_masuk_raw.columns:
+        st.info("Kolom 'INVOICE' tidak ditemukan di sheet BARANG_MASUK (atau datanya kosong), jadi Rincian per Invoice belum bisa ditampilkan.")
     else:
-        def _invoice_sort_key_cbs(s):
+        def _invoice_sort_key_rpi(s):
             if pd.isna(s):
                 return (-1, "")
             s = str(s)
@@ -1588,148 +1747,261 @@ with tab2:
             return (int(digits) if digits else -1, s)
 
         # Pilihan Invoice cuma diambil dari 40 hari terakhir (berdasarkan TANGGAL di
-        # sheet STOK GUDANG) supaya dropdown tidak penuh nomor invoice lama.
-        df_stok_gudang_cbs_opsi = df_stok_gudang_raw
-        if "Tanggal_Lengkap" in df_stok_gudang_raw.columns:
-            batas_awal_cbs = pd.Timestamp.now().normalize() - pd.Timedelta(days=40)
-            df_stok_gudang_cbs_opsi = df_stok_gudang_raw[df_stok_gudang_raw["Tanggal_Lengkap"] >= batas_awal_cbs]
+        # sheet BARANG_MASUK) supaya dropdown tidak penuh nomor invoice lama.
+        df_bm_opsi_rpi = df_barang_masuk_raw
+        if "Tanggal_Lengkap" in df_barang_masuk_raw.columns:
+            batas_awal_rpi = pd.Timestamp.now().normalize() - pd.Timedelta(days=40)
+            df_bm_opsi_rpi = df_barang_masuk_raw[df_barang_masuk_raw["Tanggal_Lengkap"] >= batas_awal_rpi]
 
-        invoice_opts_cbs = sorted(
-            df_stok_gudang_cbs_opsi["INVOICE"].dropna().astype(str).unique(),
-            key=_invoice_sort_key_cbs, reverse=True
+        invoice_opts_rpi = sorted(
+            df_bm_opsi_rpi["INVOICE"].dropna().astype(str).unique(),
+            key=_invoice_sort_key_rpi, reverse=True
         )
-        if not invoice_opts_cbs:
-            st.info("Belum ada nomor Invoice di sheet STOK GUDANG dalam 40 hari terakhir.")
+        if not invoice_opts_rpi:
+            st.info("Belum ada nomor Invoice di sheet BARANG_MASUK dalam 40 hari terakhir.")
         else:
-            sel_invoice_cbs = st.selectbox("Invoice", invoice_opts_cbs, key="tab2_cbs_invoice")
-            df_cbs = df_stok_gudang_raw[df_stok_gudang_raw["INVOICE"].astype(str) == sel_invoice_cbs].copy()
+            sel_invoice_rpi = st.selectbox("Invoice", invoice_opts_rpi, key="tab2_rpi_invoice")
+            df_bm = df_barang_masuk_raw[df_barang_masuk_raw["INVOICE"].astype(str) == sel_invoice_rpi].copy().reset_index(drop=True)
 
-            # Tanggal/Nopol/Penimbang/Asal Barang/Lokasi ditampilkan sekali di luar
-            # tabel (dianggap sama untuk 1 invoice), bukan diulang di tiap baris grade.
-            info_fields_cbs = []
+            # Tanggal/Nopol/Penimbang/Asal Barang/Gudang dianggap sama untuk 1
+            # invoice -- ditampilkan sekali di luar tabel.
+            info_fields_rpi = []
             for src, lbl_info in [
                 ("TANGGAL", "📅 Tanggal"), ("NOPOL", "🚚 Nopol"), ("PENIMBANG", "⚖️ Penimbang"),
-                ("ASAL BARANG", "📦 Asal Barang"), ("LOKASI", "📍 Lokasi"),
+                ("ASAL BARANG", "📦 Asal Barang"), ("TUJUAN", "📍 Gudang"),
             ]:
-                if src in df_cbs.columns:
-                    _val = df_cbs[src].iloc[0] if not df_cbs.empty else None
-                    info_fields_cbs.append((lbl_info, str(_val) if is_filled(_val) else "-"))
-            if info_fields_cbs:
-                info_cols_cbs = st.columns(len(info_fields_cbs))
-                for _col, (lbl_info, val_info) in zip(info_cols_cbs, info_fields_cbs):
+                if src in df_bm.columns:
+                    _val = df_bm[src].iloc[0] if not df_bm.empty else None
+                    info_fields_rpi.append((lbl_info, str(_val) if is_filled(_val) else "-"))
+            if info_fields_rpi:
+                info_cols_rpi = st.columns(len(info_fields_rpi))
+                for _col, (lbl_info, val_info) in zip(info_cols_rpi, info_fields_rpi):
                     _col.metric(lbl_info, val_info)
 
-            # Stock Grading (KG): sheet STOK GUDANG kolom N "Jumlah Grading", dicocokkan
-            # ke Invoice (sudah difilter di atas) + Jenis + Grade yang sama -- dijumlah
-            # kalau ada lebih dari 1 baris grading untuk kombinasi Jenis+Grade yang sama.
-            if "JUMLAH GRADING" in df_cbs.columns and "JENIS" in df_cbs.columns and "GRADE" in df_cbs.columns:
-                df_cbs["Stock Grading (KG)"] = df_cbs.groupby(["JENIS", "GRADE"])["JUMLAH GRADING"].transform(lambda s: s.sum(min_count=1))
-            elif "JUMLAH GRADING" in df_cbs.columns:
-                df_cbs["Stock Grading (KG)"] = df_cbs["JUMLAH GRADING"]
+            gudang_invoice_rpi = None
+            if "TUJUAN" in df_bm.columns and not df_bm.empty and is_filled(df_bm["TUJUAN"].iloc[0]):
+                gudang_invoice_rpi = str(df_bm["TUJUAN"].iloc[0]).strip()
 
-            # Tonnase Lahan: sheet STOK GUDANG kolom M, dicocokkan Invoice + Jenis +
-            # Grade yang sama juga -- dipakai untuk mengalikan Harga Beli/Harga Modal.
-            if "TONNASE LAHAN" in df_cbs.columns and "JENIS" in df_cbs.columns and "GRADE" in df_cbs.columns:
-                df_cbs["_tonnase_lahan"] = df_cbs.groupby(["JENIS", "GRADE"])["TONNASE LAHAN"].transform(lambda s: s.sum(min_count=1))
-            elif "TONNASE LAHAN" in df_cbs.columns:
-                df_cbs["_tonnase_lahan"] = df_cbs["TONNASE LAHAN"]
+            # Modal Beli Sampe Gudang = SUM(Tonnase Lahan x Harga Beli) per baris di
+            # sheet BARANG_MASUK, untuk invoice terpilih.
+            modal_beli_rpi = 0.0
+            if "TONNASE LAHAN" in df_bm.columns and "HARGA BELI" in df_bm.columns:
+                modal_beli_rpi = float(
+                    (to_number(df_bm["TONNASE LAHAN"]).fillna(0) * to_number(df_bm["HARGA BELI"]).fillna(0)).sum()
+                )
 
-            # Stock Terjual (KG) / Total Pendapatan (Rp) / Keuntungan Bersih (Rp): sheet
-            # PENJUALAN LAPAK kolom P/S/T, dicocokkan ke Invoice (kolom F) + Jenis (N) +
-            # Grade (O) yang sama. Sengaja pakai data semua tanggal (bukan df_penjualan
-            # yang ikut filter sidebar), karena penjualan 1 invoice bisa saja jatuh di
-            # luar rentang tanggal yang lagi dipilih di sidebar.
-            agg_jual_cbs = {}
-            if "Jumlah (KG)" in df_penjualan_raw.columns:
-                agg_jual_cbs["Stock Terjual (KG)"] = ("Jumlah (KG)", "sum")
-            if "Total harga" in df_penjualan_raw.columns:
-                agg_jual_cbs["Total Pendapatan (Rp)"] = ("Total harga", "sum")
-            if "Keuntungan" in df_penjualan_raw.columns:
-                agg_jual_cbs["Keuntungan Bersih (Rp)"] = ("Keuntungan", "sum")
-
-            if (agg_jual_cbs and "INVOICE" in df_penjualan_raw.columns
-                    and "JENIS" in df_penjualan_raw.columns and "GRADE" in df_penjualan_raw.columns
-                    and "JENIS" in df_cbs.columns and "GRADE" in df_cbs.columns):
-                df_penjualan_invoice_cbs = df_penjualan_raw[df_penjualan_raw["INVOICE"].astype(str) == sel_invoice_cbs]
-                if not df_penjualan_invoice_cbs.empty:
-                    df_jual_grade_cbs = df_penjualan_invoice_cbs.groupby(["JENIS", "GRADE"]).agg(**agg_jual_cbs).reset_index()
-                    df_cbs = df_cbs.merge(df_jual_grade_cbs, on=["JENIS", "GRADE"], how="left")
-
-            for _c in ["Stock Terjual (KG)", "Total Pendapatan (Rp)", "Keuntungan Bersih (Rp)"]:
-                if _c in df_cbs.columns:
-                    df_cbs[_c] = df_cbs[_c].fillna(0)
-
-            # Harga Beli & Harga Modal di sheet STOK GUDANG adalah harga per KG --
-            # dikalikan Tonnase Lahan (bukan Stock Grading) supaya jadi nilai total.
-            if "HARGA BELI" in df_cbs.columns and "_tonnase_lahan" in df_cbs.columns:
-                df_cbs["Harga Beli"] = df_cbs["HARGA BELI"] * df_cbs["_tonnase_lahan"]
-            if "HARGA MODAL" in df_cbs.columns and "_tonnase_lahan" in df_cbs.columns:
-                df_cbs["Harga Modal"] = df_cbs["HARGA MODAL"] * df_cbs["_tonnase_lahan"]
-
-            kolom_cbs = [
-                ("JENIS", "Jenis", "txt"),
-                ("GRADE", "Grade", "txt"),
-                ("Stock Terjual (KG)", "Stock Terjual (KG)", "num"),
-                ("Total Pendapatan (Rp)", "Total Pendapatan (Rp)", "rp"),
-                ("Keuntungan Bersih (Rp)", "Keuntungan Bersih (Rp)", "rp"),
-                ("Stock Grading (KG)", "Stock Grading (KG)", "num"),
-                ("Harga Beli", "Harga Beli", "rp"),
-                ("Harga Modal", "Harga Modal", "rp"),
-            ]
-            kolom_cbs_ada = [(src, lbl, tp) for src, lbl, tp in kolom_cbs if src in df_cbs.columns]
-
-            if not kolom_cbs_ada:
-                st.info("Kolom untuk rekap Rincian per Invoice tidak ditemukan di sheet STOK GUDANG.")
-            else:
-                def _esc_cbs(x):
-                    s = "" if x is None else str(x)
-                    return (s.replace("&", "&amp;").replace("<", "&lt;")
-                             .replace(">", "&gt;").replace('"', "&quot;"))
-
-                def _fmt_cbs(v, tp):
-                    if tp == "rp":
-                        return rp(v) if pd.notna(v) else ""
-                    if tp == "num":
-                        return f"{v:,.1f}" if pd.notna(v) else ""
-                    return "" if pd.isna(v) else str(v)
-
-                total_cells_html = []
-                for _idx, (src, lbl, tp) in enumerate(kolom_cbs_ada):
-                    if _idx == 0:
-                        total_cells_html.append("<td>TOTAL</td>")
-                    elif tp in ("rp", "num"):
-                        _tot = to_number(df_cbs[src]).sum()
-                        total_cells_html.append(f'<td class="cbs-num">{_esc_cbs(_fmt_cbs(_tot, tp))}</td>')
+            # ---------- Tabel HIJAU: rekap level Gudang ----------
+            df_green_rpi = pd.DataFrame(columns=["JENIS", "GRADE", "Total Grading", "Stok Gudang", "Terjual Gudang", "Pendapatan Gudang"])
+            if "JENIS" in df_bm.columns and "GRADE" in df_bm.columns:
+                df_bm_valid_rpi = df_bm[df_bm["JENIS"].apply(is_filled) & df_bm["GRADE"].apply(is_filled)]
+                if not df_bm_valid_rpi.empty:
+                    agg_green_rpi = {}
+                    if "TOTAL GRADING" in df_bm_valid_rpi.columns:
+                        agg_green_rpi["Total Grading"] = ("TOTAL GRADING", "sum")
+                    if "STOK GUDANG" in df_bm_valid_rpi.columns:
+                        agg_green_rpi["Stok Gudang"] = ("STOK GUDANG", "sum")
+                    if agg_green_rpi:
+                        df_green_rpi = df_bm_valid_rpi.groupby(["JENIS", "GRADE"], as_index=False).agg(**agg_green_rpi)
                     else:
-                        total_cells_html.append("<td></td>")
+                        df_green_rpi = df_bm_valid_rpi[["JENIS", "GRADE"]].drop_duplicates().reset_index(drop=True)
 
-                header_html_cbs = "".join(f"<th>{_esc_cbs(lbl)}</th>" for _, lbl, _ in kolom_cbs_ada)
+            # Terjual Gudang / Pendapatan Gudang: sheet PENJUALAN, baris dengan Gudang
+            # asal (kolom B) = Gudang invoice ini + Jenis/Grade sama + KODE LAPAK
+            # KOSONG (artinya terjual langsung di gudang, belum pindah ke lapak
+            # manapun -- kalau tidak dikecualikan, penjualan yang sudah di-moving ke
+            # lapak akan ikut kehitung dobel di sini).
+            if not df_green_rpi.empty and gudang_invoice_rpi and not df_penjualan_raw.empty \
+                    and "_PL_GUDANG_ASAL" in df_penjualan_raw.columns \
+                    and "JENIS" in df_penjualan_raw.columns and "GRADE" in df_penjualan_raw.columns:
+                mask_gudang_rpi = df_penjualan_raw["_PL_GUDANG_ASAL"] == gudang_invoice_rpi
+                if "KODE LAPAK" in df_penjualan_raw.columns:
+                    mask_gudang_rpi = mask_gudang_rpi & (~df_penjualan_raw["KODE LAPAK"].apply(is_filled))
+                df_pj_gudang_rpi = df_penjualan_raw[mask_gudang_rpi]
+                agg_pj_gudang_rpi = {}
+                if "Jumlah (KG)" in df_pj_gudang_rpi.columns:
+                    agg_pj_gudang_rpi["Terjual Gudang"] = ("Jumlah (KG)", "sum")
+                if "Total harga" in df_pj_gudang_rpi.columns:
+                    agg_pj_gudang_rpi["Pendapatan Gudang"] = ("Total harga", "sum")
+                if agg_pj_gudang_rpi and not df_pj_gudang_rpi.empty:
+                    df_pj_gudang_grp_rpi = df_pj_gudang_rpi.groupby(["JENIS", "GRADE"], as_index=False).agg(**agg_pj_gudang_rpi)
+                    df_green_rpi = df_green_rpi.merge(df_pj_gudang_grp_rpi, on=["JENIS", "GRADE"], how="left")
 
-                body_rows_cbs = []
-                for _, _row in df_cbs.iterrows():
-                    cells = []
-                    for src, lbl, tp in kolom_cbs_ada:
-                        v = _row.get(src)
-                        cls = ' class="cbs-num"' if tp in ("rp", "num") else ""
-                        cells.append(f"<td{cls}>{_esc_cbs(_fmt_cbs(v, tp))}</td>")
-                    body_rows_cbs.append(f"<tr>{''.join(cells)}</tr>")
+            for _c in ["Total Grading", "Stok Gudang", "Terjual Gudang", "Pendapatan Gudang"]:
+                if _c not in df_green_rpi.columns:
+                    df_green_rpi[_c] = 0.0
+                df_green_rpi[_c] = to_number(df_green_rpi[_c]).fillna(0)
+            df_green_rpi = df_green_rpi.sort_values(["JENIS", "GRADE"]).reset_index(drop=True)
 
-                cbs_html = f"""<style>
-.cbs-wrap {{ max-height: 520px; overflow: auto; border: 1px solid #e0e6f0; border-radius: 8px; }}
-.cbs-table {{ width: 100%; border-collapse: collapse; font-size: 13.5px; }}
-.cbs-table th {{ position: sticky; top: 32px; background: #1f3864; color: #fff; padding: 9px 10px; text-align: left; white-space: nowrap; z-index: 1; }}
-.cbs-table td {{ padding: 8px 10px; border-bottom: 1px solid #eef1f6; white-space: nowrap; }}
-.cbs-table td.cbs-num {{ text-align: right; }}
-.cbs-table tr.cbs-total-row td {{ position: sticky; top: 0; background: #4472c4; color: #fff; font-weight: 800; z-index: 2; }}
+            # ---------- Tabel PINK: rekap level Lapak (setelah moving) ----------
+            df_pink_rpi = pd.DataFrame(columns=["TUJUAN", "JENIS", "GRADE", "JUMLAH MOVING", "STOK LAPAK", "Terjual", "Pendapatan", "Modal", "Total Pendapatan"])
+            if not df_green_rpi.empty and not df_stok_lapak_invoice_raw.empty \
+                    and "JENIS" in df_stok_lapak_invoice_raw.columns and "GRADE" in df_stok_lapak_invoice_raw.columns \
+                    and "TUJUAN" in df_stok_lapak_invoice_raw.columns:
+                df_pink_rpi = df_stok_lapak_invoice_raw.merge(
+                    df_green_rpi[["JENIS", "GRADE"]].drop_duplicates(), on=["JENIS", "GRADE"], how="inner"
+                ).reset_index(drop=True)
+                df_pink_rpi = df_pink_rpi[df_pink_rpi["TUJUAN"].apply(is_filled)].reset_index(drop=True)
+
+            if not df_pink_rpi.empty:
+                jkg_p = to_number(df_pink_rpi["JUMLAH MOVING"]).fillna(0) if "JUMLAH MOVING" in df_pink_rpi.columns else pd.Series([0.0] * len(df_pink_rpi))
+                hpp_p = to_number(df_pink_rpi["HPP LAPAK"]).fillna(0) if "HPP LAPAK" in df_pink_rpi.columns else pd.Series([0.0] * len(df_pink_rpi))
+                stk_p = to_number(df_pink_rpi["STOK LAPAK"]).fillna(0) if "STOK LAPAK" in df_pink_rpi.columns else pd.Series([0.0] * len(df_pink_rpi))
+                df_pink_rpi["JUMLAH MOVING"] = jkg_p.values
+                df_pink_rpi["STOK LAPAK"] = stk_p.values
+                df_pink_rpi["Modal"] = (jkg_p * hpp_p).values
+
+                # Terjual / Pendapatan (lapak): sheet PENJUALAN, dicocokkan Kode Lapak
+                # (di data penjualan) == Moving/Tujuan lapak (di data stok), + Jenis +
+                # Grade sama.
+                if not df_penjualan_raw.empty and "KODE LAPAK" in df_penjualan_raw.columns \
+                        and "JENIS" in df_penjualan_raw.columns and "GRADE" in df_penjualan_raw.columns:
+                    agg_pj_lapak_rpi = {}
+                    if "Jumlah (KG)" in df_penjualan_raw.columns:
+                        agg_pj_lapak_rpi["Terjual"] = ("Jumlah (KG)", "sum")
+                    if "Total harga" in df_penjualan_raw.columns:
+                        agg_pj_lapak_rpi["Pendapatan"] = ("Total harga", "sum")
+                    if agg_pj_lapak_rpi:
+                        df_pj_valid_rpi = df_penjualan_raw[df_penjualan_raw["KODE LAPAK"].apply(is_filled)]
+                        if not df_pj_valid_rpi.empty:
+                            df_pj_lapak_grp_rpi = df_pj_valid_rpi.groupby(["KODE LAPAK", "JENIS", "GRADE"], as_index=False).agg(**agg_pj_lapak_rpi)
+                            df_pink_rpi = df_pink_rpi.merge(
+                                df_pj_lapak_grp_rpi, left_on=["TUJUAN", "JENIS", "GRADE"],
+                                right_on=["KODE LAPAK", "JENIS", "GRADE"], how="left"
+                            )
+                for _c in ["Terjual", "Pendapatan"]:
+                    if _c not in df_pink_rpi.columns:
+                        df_pink_rpi[_c] = 0.0
+                    df_pink_rpi[_c] = to_number(df_pink_rpi[_c]).fillna(0)
+
+                df_pink_rpi = df_pink_rpi.sort_values(["TUJUAN", "JENIS", "GRADE"]).reset_index(drop=True)
+                # Total Pendapatan dijumlah per kelompok Moving (Tujuan), tampil
+                # sekali per kelompok (gaya sel gabungan) di HTML nanti.
+                df_pink_rpi["Total Pendapatan"] = df_pink_rpi.groupby("TUJUAN")["Pendapatan"].transform("sum")
+
+            total_pendapatan_lapak_rpi = float(df_pink_rpi["Pendapatan"].sum()) if not df_pink_rpi.empty else 0.0
+            total_moving_rpi = float(df_pink_rpi["JUMLAH MOVING"].sum()) if not df_pink_rpi.empty and "JUMLAH MOVING" in df_pink_rpi.columns else 0.0
+            modal_lapak_rpi = float(df_pink_rpi["Modal"].sum()) if not df_pink_rpi.empty else 0.0
+
+            st.write("")
+            agg_cols_rpi = st.columns(4)
+            agg_cols_rpi[0].metric("💰 Modal Beli Sampe Gudang", rp(modal_beli_rpi))
+            agg_cols_rpi[1].metric("📈 Total Pendapatan di Lapak", rp(total_pendapatan_lapak_rpi))
+            agg_cols_rpi[2].metric("🚚 Total Moving", f"{total_moving_rpi:,.0f} KG")
+            agg_cols_rpi[3].metric("🧮 Modal Lapak", rp(modal_lapak_rpi))
+            st.write("")
+
+            def _esc_rpi(x):
+                s = "" if x is None else str(x)
+                return (s.replace("&", "&amp;").replace("<", "&lt;")
+                         .replace(">", "&gt;").replace('"', "&quot;"))
+
+            # --- HTML tabel HIJAU (Data Gudang) ---
+            if df_green_rpi.empty:
+                green_html = (
+                    '<div class="rpi-panel-title rpi-green">📗 Data Gudang</div>'
+                    '<p class="rpi-empty">Tidak ada data Jenis/Grade untuk invoice ini.</p>'
+                )
+            else:
+                rows_g = []
+                for _, r in df_green_rpi.iterrows():
+                    rows_g.append(
+                        "<tr>"
+                        f"<td>{_esc_rpi(r['JENIS'])}</td>"
+                        f"<td>{_esc_rpi(r['GRADE'])}</td>"
+                        f"<td class=\"rpi-num\">{r['Total Grading']:,.1f}</td>"
+                        f"<td class=\"rpi-num\">{r['Stok Gudang']:,.1f}</td>"
+                        f"<td class=\"rpi-num\">{r['Terjual Gudang']:,.1f}</td>"
+                        f"<td class=\"rpi-num\">{_esc_rpi(rp(r['Pendapatan Gudang']))}</td>"
+                        "</tr>"
+                    )
+                green_html = (
+                    '<div class="rpi-panel-title rpi-green">📗 Data Gudang</div>'
+                    '<div class="rpi-wrap"><table class="rpi-table">'
+                    "<thead>"
+                    '<tr class="rpi-total-row"><td>TOTAL</td><td></td>'
+                    f'<td class="rpi-num">{df_green_rpi["Total Grading"].sum():,.1f}</td>'
+                    f'<td class="rpi-num">{df_green_rpi["Stok Gudang"].sum():,.1f}</td>'
+                    f'<td class="rpi-num">{df_green_rpi["Terjual Gudang"].sum():,.1f}</td>'
+                    f'<td class="rpi-num">{_esc_rpi(rp(df_green_rpi["Pendapatan Gudang"].sum()))}</td></tr>'
+                    "<tr><th>Jenis</th><th>Grade</th><th>Total Grading</th><th>Stok Gudang</th>"
+                    "<th>Terjual Gudang</th><th>Pendapatan Gudang</th></tr>"
+                    "</thead>"
+                    f'<tbody>{"".join(rows_g)}</tbody>'
+                    "</table></div>"
+                )
+
+            # --- HTML tabel PINK (Data Lapak setelah Moving) ---
+            if df_pink_rpi.empty:
+                pink_html = (
+                    '<div class="rpi-panel-title rpi-pink">📕 Data Lapak (Setelah Moving)</div>'
+                    '<p class="rpi-empty">Belum ada data Stok Lapak untuk Jenis/Grade invoice ini.</p>'
+                )
+            else:
+                n_pk = len(df_pink_rpi)
+                grp_size_pk = df_pink_rpi.groupby("TUJUAN")["TUJUAN"].transform("size").tolist()
+                is_first_pk = (df_pink_rpi["TUJUAN"] != df_pink_rpi["TUJUAN"].shift(1)).tolist()
+                rows_p = []
+                for i in range(n_pk):
+                    r = df_pink_rpi.iloc[i]
+                    cell_moving = (
+                        f'<td class="rpi-merge" rowspan="{grp_size_pk[i]}">{_esc_rpi(r["TUJUAN"])}</td>'
+                        if is_first_pk[i] else ""
+                    )
+                    cell_total_pend = (
+                        f'<td class="rpi-merge" rowspan="{grp_size_pk[i]}">{_esc_rpi(rp(r["Total Pendapatan"]))}</td>'
+                        if is_first_pk[i] else ""
+                    )
+                    rows_p.append(
+                        "<tr>"
+                        f"{cell_moving}"
+                        f"<td>{_esc_rpi(r['JENIS'])}</td>"
+                        f"<td>{_esc_rpi(r['GRADE'])}</td>"
+                        f"<td class=\"rpi-num\">{r['JUMLAH MOVING']:,.1f}</td>"
+                        f"<td class=\"rpi-num\">{r['STOK LAPAK']:,.1f}</td>"
+                        f"<td class=\"rpi-num\">{r['Terjual']:,.1f}</td>"
+                        f"<td class=\"rpi-num\">{_esc_rpi(rp(r['Pendapatan']))}</td>"
+                        f"{cell_total_pend}"
+                        f"<td class=\"rpi-num\">{_esc_rpi(rp(r['Modal']))}</td>"
+                        "</tr>"
+                    )
+                pink_html = (
+                    '<div class="rpi-panel-title rpi-pink">📕 Data Lapak (Setelah Moving)</div>'
+                    '<div class="rpi-wrap"><table class="rpi-table">'
+                    "<thead>"
+                    '<tr class="rpi-total-row"><td>TOTAL</td><td></td><td></td>'
+                    f'<td class="rpi-num">{df_pink_rpi["JUMLAH MOVING"].sum():,.1f}</td>'
+                    f'<td class="rpi-num">{df_pink_rpi["STOK LAPAK"].sum():,.1f}</td>'
+                    f'<td class="rpi-num">{df_pink_rpi["Terjual"].sum():,.1f}</td>'
+                    f'<td class="rpi-num">{_esc_rpi(rp(df_pink_rpi["Pendapatan"].sum()))}</td>'
+                    f'<td class="rpi-num">{_esc_rpi(rp(df_pink_rpi["Pendapatan"].sum()))}</td>'
+                    f'<td class="rpi-num">{_esc_rpi(rp(df_pink_rpi["Modal"].sum()))}</td></tr>'
+                    "<tr><th>Moving</th><th>Jenis</th><th>Grade</th><th>Jumlah (KG)</th><th>Stok (KG)</th>"
+                    "<th>Terjual</th><th>Pendapatan</th><th>Total Pendapatan</th><th>Modal</th></tr>"
+                    "</thead>"
+                    f'<tbody>{"".join(rows_p)}</tbody>'
+                    "</table></div>"
+                )
+
+            rpi_html = f"""<style>
+.rpi-row {{ display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-start; }}
+.rpi-panel {{ flex: 1; min-width: 380px; }}
+.rpi-panel-title {{ font-size: 15px; font-weight: 800; padding: 9px 12px; border-radius: 8px 8px 0 0; color: #fff; }}
+.rpi-green {{ background: #2ca02c; }}
+.rpi-pink  {{ background: #d6336c; }}
+.rpi-empty {{ padding: 14px; color: #888; border: 1px solid #e0e6f0; border-top: none; border-radius: 0 0 8px 8px; margin: 0; }}
+.rpi-wrap {{ max-height: 480px; overflow: auto; border: 1px solid #e0e6f0; border-radius: 0 0 8px 8px; }}
+.rpi-table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
+.rpi-table th {{ position: sticky; top: 32px; background: #1f3864; color: #fff; padding: 8px 9px; text-align: left; white-space: nowrap; z-index: 1; }}
+.rpi-table td {{ padding: 7px 9px; border-bottom: 1px solid #eef1f6; white-space: nowrap; }}
+.rpi-table td.rpi-num {{ text-align: right; }}
+.rpi-table td.rpi-merge {{ text-align: center; vertical-align: middle; font-weight: 800; color: #1f3864; border-left: 1px solid #e0e6f0; background: #f4f7fc; }}
+.rpi-table tr.rpi-total-row td {{ position: sticky; top: 0; background: #4472c4; color: #fff; font-weight: 800; z-index: 2; }}
 </style>
-<div class="cbs-wrap"><table class="cbs-table">
-<thead>
-<tr class="cbs-total-row">{"".join(total_cells_html)}</tr>
-<tr>{header_html_cbs}</tr>
-</thead>
-<tbody>{"".join(body_rows_cbs)}</tbody>
-</table></div>"""
-                st.markdown(cbs_html, unsafe_allow_html=True)
+<div class="rpi-row">
+<div class="rpi-panel">{green_html}</div>
+<div class="rpi-panel">{pink_html}</div>
+</div>"""
+            st.markdown(rpi_html, unsafe_allow_html=True)
 
     st.divider()
 
