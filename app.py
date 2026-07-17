@@ -120,9 +120,13 @@ if "spreadsheet_id" not in st.secrets:
 
 SPREADSHEET_ID = st.secrets.get("spreadsheet_id")
 
+# Sheet PENJUALAN (Pendapatan Lapak & Analisa Lapak) sekarang diambil dari
+# spreadsheet terpisah ini, bukan dari SPREADSHEET_ID utama.
+PENJUALAN_LAPAK_SPREADSHEET_ID = "1p0swTGBCLA0XjNOU-bXYu1a4ECc4R2DKW1VvX7y4fWA"
+
 SHEET_ARUS_KAS        = "ARUS KAS"
 SHEET_PENGELUARAN     = "PENGELUARAN LAPAK"
-SHEET_PENJUALAN       = "PENJUALAN LAPAK"
+SHEET_PENJUALAN       = "PENJUALAN"
 SHEET_PENJUALAN_LUAR  = "PENJUALAN LAPAK LUAR"
 SHEET_PIUTANG         = "PIUTANG LAPAK"
 SHEET_PIUTANG_LUAR    = "PIUTANG LAPAK LUAR"
@@ -405,7 +409,7 @@ def _parse_tanggal(df: pd.DataFrame) -> pd.DataFrame:
 
 @st.cache_data(ttl=300, show_spinner="Memuat Penjualan Lapak...")
 def load_penjualan_lapak() -> pd.DataFrame:
-    df = fetch_raw_csv(SHEET_PENJUALAN)
+    df = fetch_raw_csv(SHEET_PENJUALAN, spreadsheet_id=PENJUALAN_LAPAK_SPREADSHEET_ID)
     if df.empty:
         return df
 
@@ -431,6 +435,13 @@ def load_penjualan_lapak() -> pd.DataFrame:
     col_laba    = _col_at(19)
     col_kredit  = _col_at(20)
     col_tunai   = _col_at(21)
+    # TANGGAL sebelumnya tidak pernah di-rename eksplisit di loader ini (beda dari
+    # load_penjualan_lapak_luar/load_stok_lapak/load_stok_gudang yang semuanya sudah
+    # menangani ini) -- kalau header asli kolom tanggal di sheet bukan persis
+    # "TANGGAL", _parse_tanggal() gagal menemukannya sama sekali, Tanggal_Lengkap
+    # jadi kosong untuk SEMUA baris, dan filter tanggal di sidebar otomatis
+    # membuang semua data (itu sebabnya Omzet/Laba/Tunai/Kredit Lapak kebaca 0).
+    col_tanggal = _get_col_by_pos_or_name(0, ["tanggal", "tgl", "date", "timestamp"])
     col_jenis   = _get_col_by_pos_or_name(13, ["jenis", "jenis tanaman", "nama barang", "produk", "komoditas"])
     col_grade   = _get_col_by_pos_or_name(14, ["grade", "kelas", "mutu"])
     col_kg      = _get_col_by_pos_or_name(15, ["jumlah (kg)", "jumlah kg", "kg", "jumlah", "berat"])
@@ -446,6 +457,8 @@ def load_penjualan_lapak() -> pd.DataFrame:
     col_keterangan = _find(["keterangan", "ket", "note", "catatan"])
 
     rename_map = {}
+    if col_tanggal and col_tanggal != "TANGGAL":
+        rename_map[col_tanggal] = "TANGGAL"
     if col_omzet and col_omzet != "Total harga":
         rename_map[col_omzet] = "Total harga"
     if col_laba and col_laba != "Keuntungan":
@@ -1399,8 +1412,6 @@ kredit_lapak  = df_penjualan["Kredit"].sum()      if not df_penjualan.empty and 
 
 omzet_lapak_luar  = df_penjualan_luar["Total harga"].sum() if not df_penjualan_luar.empty and "Total harga" in df_penjualan_luar.columns else 0
 laba_lapak_luar   = df_penjualan_luar["Keuntungan"].sum()  if not df_penjualan_luar.empty and "Keuntungan"  in df_penjualan_luar.columns else 0
-tunai_lapak_luar  = df_penjualan_luar["Tunai"].sum()       if not df_penjualan_luar.empty and "Tunai"       in df_penjualan_luar.columns else 0
-kredit_lapak_luar = df_penjualan_luar["Kredit"].sum()      if not df_penjualan_luar.empty and "Kredit"      in df_penjualan_luar.columns else 0
 
 omzet_ekspedisi = df_ekspedisi["PENDAPATAN"].sum()  if not df_ekspedisi.empty and "PENDAPATAN"  in df_ekspedisi.columns else 0
 biaya_ekspedisi = df_ekspedisi["PENGELUARAN"].sum() if not df_ekspedisi.empty and "PENGELUARAN" in df_ekspedisi.columns else 0
@@ -1468,11 +1479,9 @@ with tab1:
 
     with st.container(border=True):
         st.markdown('<div class="income-card-title">🏬 Pendapatan Lapak Luar</div>', unsafe_allow_html=True)
-        l1, l2, l3, l4 = st.columns(4)
+        l1, l2 = st.columns(2)
         l1.metric("Omzet Lapak Luar", rp(omzet_lapak_luar))
         l2.metric("Laba Lapak Luar",  rp(laba_lapak_luar))
-        l3.metric("Tunai",            rp(tunai_lapak_luar))
-        l4.metric("Kredit",           rp(kredit_lapak_luar))
 
     with st.container(border=True):
         st.markdown('<div class="income-card-title">🚛 Pendapatan Ekspedisi</div>', unsafe_allow_html=True)
