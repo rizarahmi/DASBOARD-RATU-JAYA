@@ -126,7 +126,7 @@ PENJUALAN_LAPAK_SPREADSHEET_ID = "1p0swTGBCLA0XjNOU-bXYu1a4ECc4R2DKW1VvX7y4fWA"
 
 SHEET_ARUS_KAS        = "ARUS KAS"
 SHEET_PENGELUARAN     = "PENGELUARAN LAPAK"
-SHEET_PENJUALAN       = "PENJUALAN"
+SHEET_PENJUALAN       = "PENDAPATAN"
 SHEET_PENJUALAN_LUAR  = "PENJUALAN LAPAK LUAR"
 SHEET_PIUTANG         = "PIUTANG LAPAK"
 SHEET_PIUTANG_LUAR    = "PIUTANG LAPAK LUAR"
@@ -428,10 +428,10 @@ def load_penjualan_lapak() -> pd.DataFrame:
             return all_cols[idx]
         return None
 
-    # Omzet/Laba/Kredit/Tunai sudah dikonfirmasi posisinya persis di sheet PENJUALAN
-    # LAPAK: S=Omzet, T=Laba, U=Kredit, V=Tunai. Diambil langsung by posisi (bukan
-    # dicari by nama dulu) supaya tidak salah ambil kolom lain yang kebetulan juga
-    # bernama umum seperti "Total" -- ini akar penyebab Pendapatan Lapak kebaca 0.
+    # Omzet/Laba/Kredit/Tunai sudah dikonfirmasi posisinya persis di sheet
+    # PENDAPATAN: S=Omzet, T=Laba, U=Kredit, V=Tunai. Diambil langsung by posisi
+    # (bukan dicari by nama dulu) supaya tidak salah ambil kolom lain yang
+    # kebetulan juga bernama umum seperti "Total".
     col_omzet   = _col_at(18)
     col_laba    = _col_at(19)
     col_kredit  = _col_at(20)
