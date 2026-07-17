@@ -563,15 +563,27 @@ def load_penjualan_lapak_luar() -> pd.DataFrame:
         # yang sudah ada duluan di sheet pada posisi lain.)
         df = df.loc[:, ~df.columns.duplicated()]
 
-    # Tanggal/Tanggal Nota Balik/Invoice/Nama Pelanggan hanya terisi di baris pertama
-    # tiap invoice di sheet (baris grade berikutnya kosong, gaya sel gabungan). Isi ke
-    # bawah supaya tiap baris grade tetap terhubung ke invoice yang benar -- ini akar
-    # penyebab Total Omzet/Laba (dan rekap per Nama Pelanggan) sempat salah, karena
-    # baris lanjutan yang Nama Pelanggan-nya kosong ikut terbuang oleh filter lama.
-    for col in ["TANGGAL", "TANGGAL NOTA BALIK", "INVOICE", "NAMA PELANGGAN"]:
+    # Tanggal/Invoice/Nama Pelanggan hanya terisi di baris pertama tiap invoice di
+    # sheet (baris grade berikutnya kosong, gaya sel gabungan). Isi ke bawah supaya
+    # tiap baris grade tetap terhubung ke invoice yang benar -- ini akar penyebab
+    # Total Omzet/Laba (dan rekap per Nama Pelanggan) sempat salah, karena baris
+    # lanjutan yang Nama Pelanggan-nya kosong ikut terbuang oleh filter lama.
+    for col in ["TANGGAL", "INVOICE", "NAMA PELANGGAN"]:
         if col in df.columns:
             df[col] = df[col].replace(r"^\s*$", np.nan, regex=True)
             df[col] = df[col].ffill()
+
+    # Tanggal Nota Balik ikut gaya sel gabungan yang sama, tapi beda dari Tanggal/
+    # Invoice/Nama Pelanggan: 1 invoice bisa saja memang belum punya nota balik sama
+    # sekali. Makanya ffill-nya dikelompokkan per INVOICE (bukan ke seluruh tabel),
+    # supaya invoice yang belum ada tanggal nota baliknya tetap kosong apa adanya,
+    # tidak ikut kebawa tanggal dari invoice sebelumnya.
+    if "TANGGAL NOTA BALIK" in df.columns:
+        df["TANGGAL NOTA BALIK"] = df["TANGGAL NOTA BALIK"].replace(r"^\s*$", np.nan, regex=True)
+        if "INVOICE" in df.columns:
+            df["TANGGAL NOTA BALIK"] = df.groupby("INVOICE")["TANGGAL NOTA BALIK"].ffill()
+        else:
+            df["TANGGAL NOTA BALIK"] = df["TANGGAL NOTA BALIK"].ffill()
 
     for col in ["Total harga", "Keuntungan", "Tunai", "Kredit", "Jumlah (KG)", "_RAW_LUAR_TONASE_LAHAN_KG", "_RAW_LUAR_HARGA_BELI", "_RAW_LUAR_MODAL", "_RAW_LUAR_NOTA_BALIK"]:
         if col in df.columns:
