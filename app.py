@@ -411,6 +411,9 @@ def load_penjualan_lapak() -> pd.DataFrame:
 
     all_cols = list(df.columns)
 
+    def _col_at(idx):
+        return all_cols[idx] if idx < len(all_cols) else None
+
     def _get_col_by_pos_or_name(idx, name_candidates):
         for name in name_candidates:
             matches = [c for c in all_cols if c.strip().lower() == name.lower()]
@@ -420,8 +423,14 @@ def load_penjualan_lapak() -> pd.DataFrame:
             return all_cols[idx]
         return None
 
-    col_omzet   = _get_col_by_pos_or_name(18, ["total harga", "total_harga", "omzet", "total"])
-    col_laba    = _get_col_by_pos_or_name(19, ["keuntungan", "laba", "profit"])
+    # Omzet/Laba/Kredit/Tunai sudah dikonfirmasi posisinya persis di sheet PENJUALAN
+    # LAPAK: S=Omzet, T=Laba, U=Kredit, V=Tunai. Diambil langsung by posisi (bukan
+    # dicari by nama dulu) supaya tidak salah ambil kolom lain yang kebetulan juga
+    # bernama umum seperti "Total" -- ini akar penyebab Pendapatan Lapak kebaca 0.
+    col_omzet   = _col_at(18)
+    col_laba    = _col_at(19)
+    col_kredit  = _col_at(20)
+    col_tunai   = _col_at(21)
     col_jenis   = _get_col_by_pos_or_name(13, ["jenis", "jenis tanaman", "nama barang", "produk", "komoditas"])
     col_grade   = _get_col_by_pos_or_name(14, ["grade", "kelas", "mutu"])
     col_kg      = _get_col_by_pos_or_name(15, ["jumlah (kg)", "jumlah kg", "kg", "jumlah", "berat"])
@@ -433,8 +442,6 @@ def load_penjualan_lapak() -> pd.DataFrame:
             if m: return m[0]
         return None
 
-    col_tunai      = _find(["tunai", "cash"])
-    col_kredit     = _find(["kredit", "credit", "piutang"])
     col_kode_lapak = _find(["kode lapak", "kode_lapak", "lapak"])
     col_keterangan = _find(["keterangan", "ket", "note", "catatan"])
 
@@ -461,6 +468,11 @@ def load_penjualan_lapak() -> pd.DataFrame:
         rename_map[col_keterangan] = "Keterangan"
     if rename_map:
         df = df.rename(columns=rename_map)
+        # Jaga-jaga: kalau salah satu target rename di atas kebetulan sudah ada
+        # sebagai nama kolom asli di posisi lain, df[col] bisa mengembalikan
+        # DataFrame (bukan Series) dan bikin to_number() error. Kolom pertama
+        # (posisi paling kiri) yang dipakai.
+        df = df.loc[:, ~df.columns.duplicated()]
 
     for col in ["Total harga", "Keuntungan", "Tunai", "Kredit", "Jumlah (KG)"]:
         if col in df.columns:
