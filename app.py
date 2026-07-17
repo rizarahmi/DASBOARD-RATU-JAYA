@@ -2449,9 +2449,11 @@ with tab2b:
             if "INVOICE" in df_rincian_luar.columns and n_rows_rl > 0:
                 grp_size_rl = df_rincian_luar.groupby("INVOICE")["INVOICE"].transform("size").tolist()
                 is_first_rl = (df_rincian_luar["INVOICE"] != df_rincian_luar["INVOICE"].shift(1)).tolist()
+                is_last_rl = (df_rincian_luar["INVOICE"] != df_rincian_luar["INVOICE"].shift(-1)).tolist()
             else:
                 grp_size_rl = [1] * n_rows_rl
                 is_first_rl = [True] * n_rows_rl
+                is_last_rl = [True] * n_rows_rl
 
             # kolom_spec: tiap kolom "text" (tampil apa adanya di setiap baris) atau
             # "merge" (digabung/rowspan mengikuti kelompok Invoice -- rata tengah,
@@ -2522,12 +2524,12 @@ with tab2b:
                 cells = []
                 for k in kolom_spec:
                     if k["kind"] == "text":
-                        cls = k["css"]
+                        cls = (k["css"] + " rl-group-end").strip() if is_last_rl[i] else k["css"]
                         cells.append(f'<td class="{cls}">{_esc(k["vals"][i])}</td>' if cls else f"<td>{_esc(k['vals'][i])}</td>")
                     elif is_first_rl[i]:
                         raw = k["vals"][i]
                         disp = k["fmt"](raw) if k.get("fmt") else raw
-                        cells.append(f'<td class="rl-merge" rowspan="{grp_size_rl[i]}">{_esc(disp)}</td>')
+                        cells.append(f'<td class="rl-merge rl-group-end" rowspan="{grp_size_rl[i]}">{_esc(disp)}</td>')
                     # baris bukan-pertama dalam kelompok: sel merge dilewati (sudah tercakup rowspan)
                 body_rows_html.append(f"<tr>{''.join(cells)}</tr>")
 
@@ -2539,6 +2541,7 @@ with tab2b:
 .rl-table tbody tr:hover td {{ background: #f8f9fa; }}
 .rl-table td.rl-num {{ text-align: right; }}
 .rl-table td.rl-merge {{ text-align: center; vertical-align: middle; font-weight: 800; color: #1f3864; border-left: 1px solid #e0e6f0; background: #f4f7fc; }}
+.rl-table td.rl-group-end {{ border-bottom: 2px solid #1f3864; }}
 </style>
 <div class="rl-wrap"><table class="rl-table">
 <thead><tr>{header_html}</tr></thead>
