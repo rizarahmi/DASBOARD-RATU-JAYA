@@ -495,11 +495,7 @@ def load_penjualan_lapak_luar() -> pd.DataFrame:
     col_invoice       = _col_at(2)
     col_nama          = _col_at(3)
     col_grade         = _col_at(7)
-    col_tonase_lahan  = _col_at(8)
     col_kg            = _col_at(9)
-    col_harga_beli    = _col_at(11)
-    col_modal         = _col_at(15)
-    col_nota_balik    = _col_at(17)
 
     def _find_or_pos(names, idx):
         for n in names:
@@ -532,16 +528,8 @@ def load_penjualan_lapak_luar() -> pd.DataFrame:
         rename_map[col_nama] = "NAMA PELANGGAN"
     if col_grade and col_grade != "GRADE":
         rename_map[col_grade] = "GRADE"
-    if col_tonase_lahan and col_tonase_lahan != "Tonase Lahan (KG)":
-        rename_map[col_tonase_lahan] = "Tonase Lahan (KG)"
     if col_kg and col_kg != "Jumlah (KG)":
         rename_map[col_kg] = "Jumlah (KG)"
-    if col_harga_beli and col_harga_beli != "Harga Beli":
-        rename_map[col_harga_beli] = "Harga Beli"
-    if col_modal and col_modal != "Modal":
-        rename_map[col_modal] = "Modal"
-    if col_nota_balik and col_nota_balik != "Nota Balik":
-        rename_map[col_nota_balik] = "Nota Balik"
     if col_omzet and col_omzet != "Total harga":
         rename_map[col_omzet] = "Total harga"
     if col_laba and col_laba != "Keuntungan":
@@ -565,7 +553,7 @@ def load_penjualan_lapak_luar() -> pd.DataFrame:
             df[col] = df[col].replace(r"^\s*$", np.nan, regex=True)
             df[col] = df[col].ffill()
 
-    for col in ["Total harga", "Keuntungan", "Tunai", "Kredit", "Jumlah (KG)", "Tonase Lahan (KG)", "Harga Beli", "Modal", "Nota Balik"]:
+    for col in ["Total harga", "Keuntungan", "Tunai", "Kredit", "Jumlah (KG)"]:
         if col in df.columns:
             df[col] = to_number(df[col])
 
@@ -579,6 +567,7 @@ def load_penjualan_lapak_luar() -> pd.DataFrame:
         df = df[df["INVOICE"].apply(is_filled)].reset_index(drop=True)
 
     return df
+
 
 
 @st.cache_data(ttl=300, show_spinner="Memuat Arus Kas...")
@@ -1535,9 +1524,9 @@ with tab1:
 
 # TAB 2: ANALISA LAPAK
 with tab2:
-    section_heading("🚛 Rincian per Invoice")
+    section_heading("🚛 Close Barang Selesai")
     if df_stok_gudang_raw.empty or "INVOICE" not in df_stok_gudang_raw.columns:
-        st.info("Kolom 'INVOICE' tidak ditemukan di sheet STOK GUDANG (atau datanya kosong), jadi rekap Rincian per Invoice belum bisa ditampilkan.")
+        st.info("Kolom 'INVOICE' tidak ditemukan di sheet STOK GUDANG (atau datanya kosong), jadi rekap Close Barang Selesai belum bisa ditampilkan.")
     else:
         def _invoice_sort_key_cbs(s):
             if pd.isna(s):
@@ -1546,19 +1535,12 @@ with tab2:
             digits = "".join(ch for ch in s if ch.isdigit())
             return (int(digits) if digits else -1, s)
 
-        # Pilihan Invoice cuma diambil dari 40 hari terakhir (berdasarkan TANGGAL di
-        # sheet STOK GUDANG) supaya dropdown tidak penuh nomor invoice lama.
-        df_stok_gudang_cbs_opsi = df_stok_gudang_raw
-        if "Tanggal_Lengkap" in df_stok_gudang_raw.columns:
-            batas_awal_cbs = pd.Timestamp.now().normalize() - pd.Timedelta(days=40)
-            df_stok_gudang_cbs_opsi = df_stok_gudang_raw[df_stok_gudang_raw["Tanggal_Lengkap"] >= batas_awal_cbs]
-
         invoice_opts_cbs = sorted(
-            df_stok_gudang_cbs_opsi["INVOICE"].dropna().astype(str).unique(),
+            df_stok_gudang_raw["INVOICE"].dropna().astype(str).unique(),
             key=_invoice_sort_key_cbs, reverse=True
         )
         if not invoice_opts_cbs:
-            st.info("Belum ada nomor Invoice di sheet STOK GUDANG dalam 40 hari terakhir.")
+            st.info("Belum ada nomor Invoice di sheet STOK GUDANG.")
         else:
             sel_invoice_cbs = st.selectbox("Invoice", invoice_opts_cbs, key="tab2_cbs_invoice")
             df_cbs = df_stok_gudang_raw[df_stok_gudang_raw["INVOICE"].astype(str) == sel_invoice_cbs].copy()
@@ -1638,7 +1620,7 @@ with tab2:
             kolom_cbs_ada = [(src, lbl, tp) for src, lbl, tp in kolom_cbs if src in df_cbs.columns]
 
             if not kolom_cbs_ada:
-                st.info("Kolom untuk rekap Rincian per Invoice tidak ditemukan di sheet STOK GUDANG.")
+                st.info("Kolom untuk rekap Close Barang Selesai tidak ditemukan di sheet STOK GUDANG.")
             else:
                 def _esc_cbs(x):
                     s = "" if x is None else str(x)
@@ -2402,12 +2384,6 @@ with tab2b:
                 df_rincian_luar["Total Omzet per Invoice"] = df_rincian_luar.groupby("INVOICE")["Total harga"].transform(lambda s: s.sum(min_count=1))
             if "INVOICE" in df_rincian_luar.columns and "Keuntungan" in df_rincian_luar.columns:
                 df_rincian_luar["Total Laba per Invoice"] = df_rincian_luar.groupby("INVOICE")["Keuntungan"].transform(lambda s: s.sum(min_count=1))
-            if "INVOICE" in df_rincian_luar.columns and "Harga Beli" in df_rincian_luar.columns:
-                df_rincian_luar["Total Harga Beli"] = df_rincian_luar.groupby("INVOICE")["Harga Beli"].transform(lambda s: s.sum(min_count=1))
-            if "INVOICE" in df_rincian_luar.columns and "Modal" in df_rincian_luar.columns:
-                df_rincian_luar["Total Modal"] = df_rincian_luar.groupby("INVOICE")["Modal"].transform(lambda s: s.sum(min_count=1))
-            if "INVOICE" in df_rincian_luar.columns and "Nota Balik" in df_rincian_luar.columns:
-                df_rincian_luar["Total Nota Balik"] = df_rincian_luar.groupby("INVOICE")["Nota Balik"].transform(lambda s: s.sum(min_count=1))
 
             if "INVOICE" in df_rincian_luar.columns:
                 def _invoice_sort_key(s):
@@ -2425,9 +2401,10 @@ with tab2b:
                 # kelompok invoice (gaya sel gabungan seperti contoh gambar), baris
                 # grade lain di invoice yang sama dikosongkan.
                 is_baris_pertama_invoice = df_rincian_luar["INVOICE"] != df_rincian_luar["INVOICE"].shift(1)
-                for _kolom_total_merge in ["Total Omzet per Invoice", "Total Laba per Invoice", "Total Harga Beli", "Total Modal", "Total Nota Balik"]:
-                    if _kolom_total_merge in df_rincian_luar.columns:
-                        df_rincian_luar.loc[~is_baris_pertama_invoice, _kolom_total_merge] = np.nan
+                if "Total Omzet per Invoice" in df_rincian_luar.columns:
+                    df_rincian_luar.loc[~is_baris_pertama_invoice, "Total Omzet per Invoice"] = np.nan
+                if "Total Laba per Invoice" in df_rincian_luar.columns:
+                    df_rincian_luar.loc[~is_baris_pertama_invoice, "Total Laba per Invoice"] = np.nan
 
             def _fmt_blank(series, formatter):
                 return series.apply(lambda x: formatter(x) if pd.notna(x) else "")
@@ -2472,28 +2449,12 @@ with tab2b:
                 kolom_spec.append({"label": "Nama Pelanggan", "kind": "text", "css": "", "vals": df_rincian_luar[NAMA_COL_LUAR].fillna("").tolist()})
             if GRADE_COL_LUAR in df_rincian_luar.columns:
                 kolom_spec.append({"label": "Grade", "kind": "text", "css": "", "vals": df_rincian_luar[GRADE_COL_LUAR].fillna("").tolist()})
-            if "Tonase Lahan (KG)" in df_rincian_luar.columns:
-                kolom_spec.append({"label": "Tonase Lahan (KG)", "kind": "text", "css": "rl-num", "vals": _fmt_blank(df_rincian_luar["Tonase Lahan (KG)"], lambda x: f"{x:,.1f} KG").tolist()})
             if KG_COL_LUAR in df_rincian_luar.columns:
                 kolom_spec.append({"label": "Tonnase Nota Balik", "kind": "text", "css": "rl-num", "vals": _fmt_blank(df_rincian_luar[KG_COL_LUAR], lambda x: f"{x:,.1f} KG").tolist()})
-            if "Total Harga Beli" in df_rincian_luar.columns:
-                kolom_spec.append({
-                    "label": "Total Harga Beli", "kind": "merge", "css": "",
-                    "vals": df_rincian_luar["Total Harga Beli"].tolist(),
-                    "fmt": lambda x: (rp(x) if pd.notna(x) else ""),
-                })
-            if "Total Modal" in df_rincian_luar.columns:
-                kolom_spec.append({
-                    "label": "Total Modal", "kind": "merge", "css": "",
-                    "vals": df_rincian_luar["Total Modal"].tolist(),
-                    "fmt": lambda x: (rp(x) if pd.notna(x) else ""),
-                })
-            if "Total Nota Balik" in df_rincian_luar.columns:
-                kolom_spec.append({
-                    "label": "Total Nota Balik", "kind": "merge", "css": "",
-                    "vals": df_rincian_luar["Total Nota Balik"].tolist(),
-                    "fmt": lambda x: (rp(x) if pd.notna(x) else ""),
-                })
+            if "Total harga" in df_rincian_luar.columns:
+                kolom_spec.append({"label": "Omzet", "kind": "text", "css": "rl-num", "vals": _fmt_blank(df_rincian_luar["Total harga"], rp).tolist()})
+            if "Keuntungan" in df_rincian_luar.columns:
+                kolom_spec.append({"label": "Laba", "kind": "text", "css": "rl-num", "vals": _fmt_blank(df_rincian_luar["Keuntungan"], rp).tolist()})
             if "Total Omzet per Invoice" in df_rincian_luar.columns:
                 kolom_spec.append({
                     "label": "Total Omzet per Invoice", "kind": "merge", "css": "",
@@ -3075,8 +3036,8 @@ with tab4:
                     kolom_exclude_pll = set(kolom_tampil_pll) | {"Tanggal_Lengkap"} | set(kolom_raw_tgl_pll)
                     kolom_tampil_pll += [c for c in df_rincian_pll.columns if c not in kolom_exclude_pll and not str(c).startswith("_col_")]
 
-                    sort_cols_pll = ["Tanggal_Lengkap"] if "Tanggal_Lengkap" in df_rincian_pll.columns else [nama_col_pll]
-                    sort_asc_pll  = [False] if "Tanggal_Lengkap" in df_rincian_pll.columns else [True]
+                    sort_cols_pll = [nama_col_pll] + (["Tanggal_Lengkap"] if "Tanggal_Lengkap" in df_rincian_pll.columns else [])
+                    sort_asc_pll  = [True] + ([False] if "Tanggal_Lengkap" in df_rincian_pll.columns else [])
                     df_rincian_pll = df_rincian_pll.sort_values(sort_cols_pll, ascending=sort_asc_pll, na_position="last")
 
                     df_rincian_pll_tampil = df_rincian_pll[kolom_tampil_pll].copy()
