@@ -532,16 +532,16 @@ def load_penjualan_lapak_luar() -> pd.DataFrame:
         rename_map[col_nama] = "NAMA PELANGGAN"
     if col_grade and col_grade != "GRADE":
         rename_map[col_grade] = "GRADE"
-    if col_tonase_lahan and col_tonase_lahan != "Tonase Lahan (KG)":
-        rename_map[col_tonase_lahan] = "Tonase Lahan (KG)"
+    if col_tonase_lahan and col_tonase_lahan != "_RAW_LUAR_TONASE_LAHAN_KG":
+        rename_map[col_tonase_lahan] = "_RAW_LUAR_TONASE_LAHAN_KG"
     if col_kg and col_kg != "Jumlah (KG)":
         rename_map[col_kg] = "Jumlah (KG)"
-    if col_harga_beli and col_harga_beli != "Harga Beli":
-        rename_map[col_harga_beli] = "Harga Beli"
-    if col_modal and col_modal != "Modal":
-        rename_map[col_modal] = "Modal"
-    if col_nota_balik and col_nota_balik != "Nota Balik":
-        rename_map[col_nota_balik] = "Nota Balik"
+    if col_harga_beli and col_harga_beli != "_RAW_LUAR_HARGA_BELI":
+        rename_map[col_harga_beli] = "_RAW_LUAR_HARGA_BELI"
+    if col_modal and col_modal != "_RAW_LUAR_MODAL":
+        rename_map[col_modal] = "_RAW_LUAR_MODAL"
+    if col_nota_balik and col_nota_balik != "_RAW_LUAR_NOTA_BALIK":
+        rename_map[col_nota_balik] = "_RAW_LUAR_NOTA_BALIK"
     if col_omzet and col_omzet != "Total harga":
         rename_map[col_omzet] = "Total harga"
     if col_laba and col_laba != "Keuntungan":
@@ -554,11 +554,13 @@ def load_penjualan_lapak_luar() -> pd.DataFrame:
         rename_map[col_keterangan] = "Keterangan"
     if rename_map:
         df = df.rename(columns=rename_map)
-        # Jaga-jaga kalau salah satu target rename (mis. "Modal"/"Harga Beli"/"Nota
-        # Balik"/"Tonase Lahan (KG)") kebetulan sudah ada sebagai nama kolom asli di
-        # sheet pada posisi lain -- tanpa ini, df[col] bisa mengembalikan DataFrame
-        # (bukan Series) dan bikin to_number() error "arg must be a list, tuple,
-        # 1-d array, or Series". Kolom pertama (posisi paling kiri) yang dipakai.
+        # Jaga-jaga umum: kalau salah satu target rename di atas kebetulan sudah ada
+        # sebagai nama kolom asli di sheet pada posisi lain, df[col] bisa mengembalikan
+        # DataFrame (bukan Series) dan bikin to_number() error "arg must be a list,
+        # tuple, 1-d array, or Series". Kolom pertama (posisi paling kiri) yang dipakai.
+        # (4 kolom baru posisi I/L/P/R sudah pakai nama internal unik _RAW_LUAR_... di
+        # atas justru supaya TIDAK pernah bentrok dengan kolom "Harga Beli"/"Modal"/dst
+        # yang sudah ada duluan di sheet pada posisi lain.)
         df = df.loc[:, ~df.columns.duplicated()]
 
     # Tanggal/Tanggal Nota Balik/Invoice/Nama Pelanggan hanya terisi di baris pertama
@@ -571,7 +573,7 @@ def load_penjualan_lapak_luar() -> pd.DataFrame:
             df[col] = df[col].replace(r"^\s*$", np.nan, regex=True)
             df[col] = df[col].ffill()
 
-    for col in ["Total harga", "Keuntungan", "Tunai", "Kredit", "Jumlah (KG)", "Tonase Lahan (KG)", "Harga Beli", "Modal", "Nota Balik"]:
+    for col in ["Total harga", "Keuntungan", "Tunai", "Kredit", "Jumlah (KG)", "_RAW_LUAR_TONASE_LAHAN_KG", "_RAW_LUAR_HARGA_BELI", "_RAW_LUAR_MODAL", "_RAW_LUAR_NOTA_BALIK"]:
         if col in df.columns:
             df[col] = to_number(df[col])
 
@@ -2408,12 +2410,12 @@ with tab2b:
                 df_rincian_luar["Total Omzet per Invoice"] = df_rincian_luar.groupby("INVOICE")["Total harga"].transform(lambda s: s.sum(min_count=1))
             if "INVOICE" in df_rincian_luar.columns and "Keuntungan" in df_rincian_luar.columns:
                 df_rincian_luar["Total Laba per Invoice"] = df_rincian_luar.groupby("INVOICE")["Keuntungan"].transform(lambda s: s.sum(min_count=1))
-            if "INVOICE" in df_rincian_luar.columns and "Harga Beli" in df_rincian_luar.columns:
-                df_rincian_luar["Total Harga Beli"] = df_rincian_luar.groupby("INVOICE")["Harga Beli"].transform(lambda s: s.sum(min_count=1))
-            if "INVOICE" in df_rincian_luar.columns and "Modal" in df_rincian_luar.columns:
-                df_rincian_luar["Total Modal"] = df_rincian_luar.groupby("INVOICE")["Modal"].transform(lambda s: s.sum(min_count=1))
-            if "INVOICE" in df_rincian_luar.columns and "Nota Balik" in df_rincian_luar.columns:
-                df_rincian_luar["Total Nota Balik"] = df_rincian_luar.groupby("INVOICE")["Nota Balik"].transform(lambda s: s.sum(min_count=1))
+            if "INVOICE" in df_rincian_luar.columns and "_RAW_LUAR_HARGA_BELI" in df_rincian_luar.columns:
+                df_rincian_luar["Total Harga Beli"] = df_rincian_luar.groupby("INVOICE")["_RAW_LUAR_HARGA_BELI"].transform(lambda s: s.sum(min_count=1))
+            if "INVOICE" in df_rincian_luar.columns and "_RAW_LUAR_MODAL" in df_rincian_luar.columns:
+                df_rincian_luar["Total Modal"] = df_rincian_luar.groupby("INVOICE")["_RAW_LUAR_MODAL"].transform(lambda s: s.sum(min_count=1))
+            if "INVOICE" in df_rincian_luar.columns and "_RAW_LUAR_NOTA_BALIK" in df_rincian_luar.columns:
+                df_rincian_luar["Total Nota Balik"] = df_rincian_luar.groupby("INVOICE")["_RAW_LUAR_NOTA_BALIK"].transform(lambda s: s.sum(min_count=1))
 
             if "INVOICE" in df_rincian_luar.columns:
                 def _invoice_sort_key(s):
@@ -2478,8 +2480,8 @@ with tab2b:
                 kolom_spec.append({"label": "Nama Pelanggan", "kind": "text", "css": "", "vals": df_rincian_luar[NAMA_COL_LUAR].fillna("").tolist()})
             if GRADE_COL_LUAR in df_rincian_luar.columns:
                 kolom_spec.append({"label": "Grade", "kind": "text", "css": "", "vals": df_rincian_luar[GRADE_COL_LUAR].fillna("").tolist()})
-            if "Tonase Lahan (KG)" in df_rincian_luar.columns:
-                kolom_spec.append({"label": "Tonase Lahan (KG)", "kind": "text", "css": "rl-num", "vals": _fmt_blank(df_rincian_luar["Tonase Lahan (KG)"], lambda x: f"{x:,.1f} KG").tolist()})
+            if "_RAW_LUAR_TONASE_LAHAN_KG" in df_rincian_luar.columns:
+                kolom_spec.append({"label": "Tonase Lahan (KG)", "kind": "text", "css": "rl-num", "vals": _fmt_blank(df_rincian_luar["_RAW_LUAR_TONASE_LAHAN_KG"], lambda x: f"{x:,.1f} KG").tolist()})
             if KG_COL_LUAR in df_rincian_luar.columns:
                 kolom_spec.append({"label": "Tonnase Nota Balik", "kind": "text", "css": "rl-num", "vals": _fmt_blank(df_rincian_luar[KG_COL_LUAR], lambda x: f"{x:,.1f} KG").tolist()})
             if "Total Harga Beli" in df_rincian_luar.columns:
