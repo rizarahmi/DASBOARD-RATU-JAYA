@@ -428,10 +428,10 @@ def load_penjualan_lapak() -> pd.DataFrame:
             return all_cols[idx]
         return None
 
-    # Omzet/Laba/Kredit/Tunai sudah dikonfirmasi posisinya persis di sheet PENJUALAN
-    # LAPAK: S=Omzet, T=Laba, U=Kredit, V=Tunai. Diambil langsung by posisi (bukan
-    # dicari by nama dulu) supaya tidak salah ambil kolom lain yang kebetulan juga
-    # bernama umum seperti "Total" -- ini akar penyebab Pendapatan Lapak kebaca 0.
+    # Omzet/Laba/Kredit/Tunai sudah dikonfirmasi posisinya persis di sheet
+    # PENJUALAN: S=Omzet, T=Laba, U=Kredit, V=Tunai. Diambil langsung by posisi
+    # (bukan dicari by nama dulu) supaya tidak salah ambil kolom lain yang
+    # kebetulan juga bernama umum seperti "Total".
     col_omzet   = _col_at(18)
     col_laba    = _col_at(19)
     col_kredit  = _col_at(20)
@@ -495,9 +495,10 @@ def load_penjualan_lapak() -> pd.DataFrame:
     for col in ["Total harga", "Keuntungan", "Tunai", "Kredit", "Jumlah (KG)"]:
         if col in df.columns:
             df[col] = to_number(df[col])
-    # Distandarkan (strip spasi) supaya pencocokan Jenis/Grade/Gudang/Kode Lapak di
-    # Rincian per Invoice tidak meleset gara-gara spasi tersembunyi.
-    for col in ["JENIS", "GRADE", "KODE LAPAK"]:
+    # Distandarkan (strip spasi) supaya pencocokan Jenis/Grade/Gudang/Kode
+    # Lapak/Invoice di Rincian per Invoice tidak meleset gara-gara spasi
+    # tersembunyi.
+    for col in ["JENIS", "GRADE", "KODE LAPAK", "INVOICE"]:
         if col in df.columns:
             df[col] = df[col].astype(str).str.strip()
 
@@ -1155,6 +1156,13 @@ def load_barang_masuk() -> pd.DataFrame:
         df["JENIS"] = df["JENIS"].astype(str).str.strip()
     if "GRADE" in df.columns:
         df["GRADE"] = df["GRADE"].astype(str).str.strip()
+    if "INVOICE" in df.columns:
+        # Distandarkan (strip spasi) supaya cocok persis dengan INVOICE di
+        # load_stok_lapak_invoice() -- tanpa ini, pencocokan invoice di tabel
+        # "Data Lapak (Setelah Moving)" bisa gagal total kalau ada spasi
+        # tersembunyi di salah satu sisi (dropdown Invoice ambil nilai dari sini,
+        # tidak di-strip, sementara STOK LAPAK sudah di-strip).
+        df["INVOICE"] = df["INVOICE"].astype(str).str.strip()
     if "TUJUAN" in df.columns:
         df = df[df["TUJUAN"].apply(is_filled)].reset_index(drop=True)
 
@@ -1942,7 +1950,7 @@ with tab2:
             if df_pink_rpi.empty:
                 pink_html = (
                     '<div class="rpi-panel-title rpi-pink">📕 Data Lapak (Setelah Moving)</div>'
-                    '<p class="rpi-empty">Belum ada data Stok Lapak untuk Jenis/Grade invoice ini.</p>'
+                    '<p class="rpi-empty">Belum ada data STOK LAPAK dengan nomor Invoice yang sama dengan invoice ini.</p>'
                 )
             else:
                 n_pk = len(df_pink_rpi)
