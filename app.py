@@ -1974,29 +1974,31 @@ with tab2:
                 n_pk = len(df_pink_rpi)
                 grp_size_pk = df_pink_rpi.groupby("TUJUAN")["TUJUAN"].transform("size").tolist()
                 is_first_pk = (df_pink_rpi["TUJUAN"] != df_pink_rpi["TUJUAN"].shift(1)).tolist()
+                is_last_pk = (df_pink_rpi["TUJUAN"] != df_pink_rpi["TUJUAN"].shift(-1)).tolist()
                 rows_p = []
                 for i in range(n_pk):
                     r = df_pink_rpi.iloc[i]
+                    end_cls_pk = " rpi-group-end" if is_last_pk[i] else ""
                     cell_moving = (
-                        f'<td class="rpi-merge" rowspan="{grp_size_pk[i]}">{_esc_rpi(r["TUJUAN"])}</td>'
+                        f'<td class="rpi-merge rpi-group-end" rowspan="{grp_size_pk[i]}">{_esc_rpi(r["TUJUAN"])}</td>'
                         if is_first_pk[i] else ""
                     )
                     cell_total_pend = (
-                        f'<td class="rpi-merge" rowspan="{grp_size_pk[i]}">{_esc_rpi(rp(r["Total Pendapatan"]))}</td>'
+                        f'<td class="rpi-merge rpi-group-end" rowspan="{grp_size_pk[i]}">{_esc_rpi(rp(r["Total Pendapatan"]))}</td>'
                         if is_first_pk[i] else ""
                     )
                     rows_p.append(
                         "<tr>"
                         f"{cell_moving}"
-                        f"<td>{_esc_rpi(r['JENIS'])}</td>"
-                        f"<td>{_esc_rpi(r['GRADE'])}</td>"
-                        f"<td class=\"rpi-num\">{r['JUMLAH MOVING']:,.1f}</td>"
-                        f"<td class=\"rpi-num\">{r['STOK LAPAK']:,.1f}</td>"
-                        f"<td class=\"rpi-num\">{r['Terjual']:,.1f}</td>"
-                        f"<td class=\"rpi-num\">{_esc_rpi(rp(r['Pendapatan']))}</td>"
-                        f"<td class=\"rpi-num\">{_esc_rpi(rp(r['Laba']))}</td>"
+                        f"<td class=\"{end_cls_pk.strip()}\">{_esc_rpi(r['JENIS'])}</td>"
+                        f"<td class=\"{end_cls_pk.strip()}\">{_esc_rpi(r['GRADE'])}</td>"
+                        f"<td class=\"rpi-num{end_cls_pk}\">{r['JUMLAH MOVING']:,.1f}</td>"
+                        f"<td class=\"rpi-num{end_cls_pk}\">{r['STOK LAPAK']:,.1f}</td>"
+                        f"<td class=\"rpi-num{end_cls_pk}\">{r['Terjual']:,.1f}</td>"
+                        f"<td class=\"rpi-num{end_cls_pk}\">{_esc_rpi(rp(r['Pendapatan']))}</td>"
+                        f"<td class=\"rpi-num{end_cls_pk}\">{_esc_rpi(rp(r['Laba']))}</td>"
                         f"{cell_total_pend}"
-                        f"<td class=\"rpi-num\">{_esc_rpi(rp(r['Modal']))}</td>"
+                        f"<td class=\"rpi-num{end_cls_pk}\">{_esc_rpi(rp(r['Modal']))}</td>"
                         "</tr>"
                     )
                 pink_html = (
@@ -2031,6 +2033,7 @@ with tab2:
 .rpi-table td {{ padding: 7px 9px; border-bottom: 1px solid #eef1f6; white-space: nowrap; }}
 .rpi-table td.rpi-num {{ text-align: right; }}
 .rpi-table td.rpi-merge {{ text-align: center; vertical-align: middle; font-weight: 800; color: #1f3864; border-left: 1px solid #e0e6f0; background: #f4f7fc; }}
+.rpi-table td.rpi-group-end {{ border-bottom: 2px solid #1f3864; }}
 .rpi-table tr.rpi-total-row td {{ position: sticky; top: 0; background: #4472c4; color: #fff; font-weight: 800; z-index: 2; }}
 </style>
 <div class="rpi-row">
