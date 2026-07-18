@@ -1794,7 +1794,7 @@ with tab2:
             if "TUJUAN" in df_bm.columns and not df_bm.empty and is_filled(df_bm["TUJUAN"].iloc[0]):
                 gudang_invoice_rpi = str(df_bm["TUJUAN"].iloc[0]).strip()
 
-            # Modal Beli Sampe Gudang = SUM(Tonnase Lahan x Harga Modal) per baris di
+            # Modal Beli (Lahan) = SUM(Tonnase Lahan x Harga Modal) per baris di
             # sheet BARANG_MASUK, untuk invoice terpilih.
             modal_beli_rpi = 0.0
             if "TONNASE LAHAN" in df_bm.columns and "HARGA MODAL" in df_bm.columns:
@@ -1803,13 +1803,15 @@ with tab2:
                 )
 
             # ---------- Tabel HIJAU: rekap level Gudang ----------
-            df_green_rpi = pd.DataFrame(columns=["JENIS", "GRADE", "Total Grading", "Stok Gudang", "Terjual Gudang", "Pendapatan Gudang"])
+            df_green_rpi = pd.DataFrame(columns=["JENIS", "GRADE", "Total Grading", "Tonase Lahan", "Stok Gudang", "Terjual Gudang", "Pendapatan Gudang", "Laba Gudang"])
             if "JENIS" in df_bm.columns and "GRADE" in df_bm.columns:
                 df_bm_valid_rpi = df_bm[df_bm["JENIS"].apply(is_filled) & df_bm["GRADE"].apply(is_filled)]
                 if not df_bm_valid_rpi.empty:
                     agg_green_rpi = {}
                     if "TOTAL GRADING" in df_bm_valid_rpi.columns:
                         agg_green_rpi["Total Grading"] = ("TOTAL GRADING", "sum")
+                    if "TONNASE LAHAN" in df_bm_valid_rpi.columns:
+                        agg_green_rpi["Tonase Lahan"] = ("TONNASE LAHAN", "sum")
                     if "STOK GUDANG" in df_bm_valid_rpi.columns:
                         agg_green_rpi["Stok Gudang"] = ("STOK GUDANG", "sum")
                     if agg_green_rpi:
@@ -1817,11 +1819,11 @@ with tab2:
                     else:
                         df_green_rpi = df_bm_valid_rpi[["JENIS", "GRADE"]].drop_duplicates().reset_index(drop=True)
 
-            # Terjual Gudang / Pendapatan Gudang: sheet PENJUALAN, baris dengan Kode
-            # Lapak (kolom B) = kode Gudang invoice ini (nilai kolom B bisa berisi
-            # kode Gudang kalau terjual langsung di gudang, atau kode Lapak kalau
-            # sudah di-moving) + Invoice (kolom F) = invoice terpilih + Jenis/Grade
-            # sama.
+            # Terjual Gudang / Pendapatan Gudang / Laba Gudang: sheet PENJUALAN,
+            # baris dengan Kode Lapak (kolom B) = kode Gudang invoice ini (nilai
+            # kolom B bisa berisi kode Gudang kalau terjual langsung di gudang, atau
+            # kode Lapak kalau sudah di-moving) + Invoice (kolom F) = invoice
+            # terpilih + Jenis/Grade sama.
             if not df_green_rpi.empty and gudang_invoice_rpi and not df_penjualan_raw.empty \
                     and "KODE LAPAK" in df_penjualan_raw.columns \
                     and "JENIS" in df_penjualan_raw.columns and "GRADE" in df_penjualan_raw.columns:
@@ -1834,11 +1836,13 @@ with tab2:
                     agg_pj_gudang_rpi["Terjual Gudang"] = ("Jumlah (KG)", "sum")
                 if "Total harga" in df_pj_gudang_rpi.columns:
                     agg_pj_gudang_rpi["Pendapatan Gudang"] = ("Total harga", "sum")
+                if "Keuntungan" in df_pj_gudang_rpi.columns:
+                    agg_pj_gudang_rpi["Laba Gudang"] = ("Keuntungan", "sum")
                 if agg_pj_gudang_rpi and not df_pj_gudang_rpi.empty:
                     df_pj_gudang_grp_rpi = df_pj_gudang_rpi.groupby(["JENIS", "GRADE"], as_index=False).agg(**agg_pj_gudang_rpi)
                     df_green_rpi = df_green_rpi.merge(df_pj_gudang_grp_rpi, on=["JENIS", "GRADE"], how="left")
 
-            for _c in ["Total Grading", "Stok Gudang", "Terjual Gudang", "Pendapatan Gudang"]:
+            for _c in ["Total Grading", "Tonase Lahan", "Stok Gudang", "Terjual Gudang", "Pendapatan Gudang", "Laba Gudang"]:
                 if _c not in df_green_rpi.columns:
                     df_green_rpi[_c] = 0.0
                 df_green_rpi[_c] = to_number(df_green_rpi[_c]).fillna(0)
@@ -1849,7 +1853,7 @@ with tab2:
             # LAPAK) yang sama dengan invoice terpilih -- bukan lagi dicocokkan
             # tidak langsung lewat Jenis+Grade saja, supaya tidak ikut kebawa data
             # dari invoice lain yang kebetulan Jenis+Grade-nya sama.
-            df_pink_rpi = pd.DataFrame(columns=["TUJUAN", "JENIS", "GRADE", "JUMLAH MOVING", "STOK LAPAK", "Terjual", "Pendapatan", "Modal", "Total Pendapatan"])
+            df_pink_rpi = pd.DataFrame(columns=["TUJUAN", "JENIS", "GRADE", "JUMLAH MOVING", "STOK LAPAK", "Terjual", "Pendapatan", "Laba", "Modal", "Total Pendapatan"])
             if not df_stok_lapak_invoice_raw.empty and "INVOICE" in df_stok_lapak_invoice_raw.columns \
                     and "TUJUAN" in df_stok_lapak_invoice_raw.columns:
                 df_pink_rpi = df_stok_lapak_invoice_raw[
@@ -1865,9 +1869,9 @@ with tab2:
                 df_pink_rpi["STOK LAPAK"] = stk_p.values
                 df_pink_rpi["Modal"] = (jkg_p * hpp_p).values
 
-                # Terjual / Pendapatan (lapak): sheet PENJUALAN, dicocokkan Kode Lapak
-                # (kolom B) == Moving/Tujuan lapak (di data stok) + Invoice (kolom F)
-                # = invoice terpilih + Jenis + Grade sama.
+                # Terjual / Pendapatan / Laba (lapak): sheet PENJUALAN, dicocokkan
+                # Kode Lapak (kolom B) == Moving/Tujuan lapak (di data stok) +
+                # Invoice (kolom F) = invoice terpilih + Jenis + Grade sama.
                 if not df_penjualan_raw.empty and "KODE LAPAK" in df_penjualan_raw.columns \
                         and "JENIS" in df_penjualan_raw.columns and "GRADE" in df_penjualan_raw.columns:
                     df_pj_valid_rpi = df_penjualan_raw[df_penjualan_raw["KODE LAPAK"].apply(is_filled)]
@@ -1878,13 +1882,15 @@ with tab2:
                         agg_pj_lapak_rpi["Terjual"] = ("Jumlah (KG)", "sum")
                     if "Total harga" in df_pj_valid_rpi.columns:
                         agg_pj_lapak_rpi["Pendapatan"] = ("Total harga", "sum")
+                    if "Keuntungan" in df_pj_valid_rpi.columns:
+                        agg_pj_lapak_rpi["Laba"] = ("Keuntungan", "sum")
                     if agg_pj_lapak_rpi and not df_pj_valid_rpi.empty:
                         df_pj_lapak_grp_rpi = df_pj_valid_rpi.groupby(["KODE LAPAK", "JENIS", "GRADE"], as_index=False).agg(**agg_pj_lapak_rpi)
                         df_pink_rpi = df_pink_rpi.merge(
                             df_pj_lapak_grp_rpi, left_on=["TUJUAN", "JENIS", "GRADE"],
                             right_on=["KODE LAPAK", "JENIS", "GRADE"], how="left"
                         )
-                for _c in ["Terjual", "Pendapatan"]:
+                for _c in ["Terjual", "Pendapatan", "Laba"]:
                     if _c not in df_pink_rpi.columns:
                         df_pink_rpi[_c] = 0.0
                     df_pink_rpi[_c] = to_number(df_pink_rpi[_c]).fillna(0)
@@ -1894,16 +1900,24 @@ with tab2:
                 # sekali per kelompok (gaya sel gabungan) di HTML nanti.
                 df_pink_rpi["Total Pendapatan"] = df_pink_rpi.groupby("TUJUAN")["Pendapatan"].transform("sum")
 
+            # Total Pendapatan & Total Laba = gabungan Data Gudang + Data Lapak
+            # (setelah moving), dipakai untuk metrik ringkasan di atas tabel.
+            total_pendapatan_gudang_rpi = float(df_green_rpi["Pendapatan Gudang"].sum()) if not df_green_rpi.empty else 0.0
             total_pendapatan_lapak_rpi = float(df_pink_rpi["Pendapatan"].sum()) if not df_pink_rpi.empty else 0.0
+            total_pendapatan_rpi = total_pendapatan_gudang_rpi + total_pendapatan_lapak_rpi
+
+            total_laba_gudang_rpi = float(df_green_rpi["Laba Gudang"].sum()) if not df_green_rpi.empty else 0.0
+            total_laba_lapak_rpi = float(df_pink_rpi["Laba"].sum()) if not df_pink_rpi.empty else 0.0
+            total_laba_rpi = total_laba_gudang_rpi + total_laba_lapak_rpi
+
             total_moving_rpi = float(df_pink_rpi["JUMLAH MOVING"].sum()) if not df_pink_rpi.empty and "JUMLAH MOVING" in df_pink_rpi.columns else 0.0
-            modal_lapak_rpi = float(df_pink_rpi["Modal"].sum()) if not df_pink_rpi.empty else 0.0
 
             st.write("")
             agg_cols_rpi = st.columns(4)
-            agg_cols_rpi[0].metric("💰 Modal Beli Sampe Gudang", rp(modal_beli_rpi))
-            agg_cols_rpi[1].metric("📈 Total Pendapatan di Lapak", rp(total_pendapatan_lapak_rpi))
-            agg_cols_rpi[2].metric("🚚 Total Moving", f"{total_moving_rpi:,.0f} KG")
-            agg_cols_rpi[3].metric("🧮 Modal Lapak", rp(modal_lapak_rpi))
+            agg_cols_rpi[0].metric("💰 Modal Beli (Lahan)", rp(modal_beli_rpi))
+            agg_cols_rpi[1].metric("📈 Total Pendapatan", rp(total_pendapatan_rpi))
+            agg_cols_rpi[2].metric("💵 Total Laba", rp(total_laba_rpi))
+            agg_cols_rpi[3].metric("🚚 Total Moving", f"{total_moving_rpi:,.0f} KG")
             st.write("")
 
             def _esc_rpi(x):
@@ -1925,9 +1939,11 @@ with tab2:
                         f"<td>{_esc_rpi(r['JENIS'])}</td>"
                         f"<td>{_esc_rpi(r['GRADE'])}</td>"
                         f"<td class=\"rpi-num\">{r['Total Grading']:,.1f}</td>"
+                        f"<td class=\"rpi-num\">{r['Tonase Lahan']:,.1f}</td>"
                         f"<td class=\"rpi-num\">{r['Stok Gudang']:,.1f}</td>"
                         f"<td class=\"rpi-num\">{r['Terjual Gudang']:,.1f}</td>"
                         f"<td class=\"rpi-num\">{_esc_rpi(rp(r['Pendapatan Gudang']))}</td>"
+                        f"<td class=\"rpi-num\">{_esc_rpi(rp(r['Laba Gudang']))}</td>"
                         "</tr>"
                     )
                 green_html = (
@@ -1936,11 +1952,13 @@ with tab2:
                     "<thead>"
                     '<tr class="rpi-total-row"><td>TOTAL</td><td></td>'
                     f'<td class="rpi-num">{df_green_rpi["Total Grading"].sum():,.1f}</td>'
+                    f'<td class="rpi-num">{df_green_rpi["Tonase Lahan"].sum():,.1f}</td>'
                     f'<td class="rpi-num">{df_green_rpi["Stok Gudang"].sum():,.1f}</td>'
                     f'<td class="rpi-num">{df_green_rpi["Terjual Gudang"].sum():,.1f}</td>'
-                    f'<td class="rpi-num">{_esc_rpi(rp(df_green_rpi["Pendapatan Gudang"].sum()))}</td></tr>'
-                    "<tr><th>Jenis</th><th>Grade</th><th>Total Grading</th><th>Stok Gudang</th>"
-                    "<th>Terjual Gudang</th><th>Pendapatan Gudang</th></tr>"
+                    f'<td class="rpi-num">{_esc_rpi(rp(df_green_rpi["Pendapatan Gudang"].sum()))}</td>'
+                    f'<td class="rpi-num">{_esc_rpi(rp(df_green_rpi["Laba Gudang"].sum()))}</td></tr>'
+                    "<tr><th>Jenis</th><th>Grade</th><th>Total Grading</th><th>Tonase Lahan</th><th>Stok Gudang</th>"
+                    "<th>Terjual Gudang</th><th>Pendapatan Gudang</th><th>Laba Gudang</th></tr>"
                     "</thead>"
                     f'<tbody>{"".join(rows_g)}</tbody>'
                     "</table></div>"
@@ -1976,6 +1994,7 @@ with tab2:
                         f"<td class=\"rpi-num\">{r['STOK LAPAK']:,.1f}</td>"
                         f"<td class=\"rpi-num\">{r['Terjual']:,.1f}</td>"
                         f"<td class=\"rpi-num\">{_esc_rpi(rp(r['Pendapatan']))}</td>"
+                        f"<td class=\"rpi-num\">{_esc_rpi(rp(r['Laba']))}</td>"
                         f"{cell_total_pend}"
                         f"<td class=\"rpi-num\">{_esc_rpi(rp(r['Modal']))}</td>"
                         "</tr>"
@@ -1989,10 +2008,11 @@ with tab2:
                     f'<td class="rpi-num">{df_pink_rpi["STOK LAPAK"].sum():,.1f}</td>'
                     f'<td class="rpi-num">{df_pink_rpi["Terjual"].sum():,.1f}</td>'
                     f'<td class="rpi-num">{_esc_rpi(rp(df_pink_rpi["Pendapatan"].sum()))}</td>'
+                    f'<td class="rpi-num">{_esc_rpi(rp(df_pink_rpi["Laba"].sum()))}</td>'
                     f'<td class="rpi-num">{_esc_rpi(rp(df_pink_rpi["Pendapatan"].sum()))}</td>'
                     f'<td class="rpi-num">{_esc_rpi(rp(df_pink_rpi["Modal"].sum()))}</td></tr>'
                     "<tr><th>Moving</th><th>Jenis</th><th>Grade</th><th>Jumlah (KG)</th><th>Stok (KG)</th>"
-                    "<th>Terjual</th><th>Pendapatan</th><th>Total Pendapatan</th><th>Modal</th></tr>"
+                    "<th>Terjual</th><th>Pendapatan</th><th>Laba</th><th>Total Pendapatan</th><th>Modal</th></tr>"
                     "</thead>"
                     f'<tbody>{"".join(rows_p)}</tbody>'
                     "</table></div>"
