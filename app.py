@@ -2045,37 +2045,39 @@ with tab2:
     st.divider()
 
     section_heading("📦 Stok Lapak & Gudang")
-    st.caption("📌 Stok Lapak dihitung dari entri 14 hari terakhir saja (berdasarkan tanggal di kolom A sheet STOK LAPAK). Stok Gudang menampilkan seluruh data yang tersedia.")
+    st.caption("📌 Stok dihitung dari invoice 14 hari terakhir (khusus GDC: 7 hari terakhir), berdasarkan tanggal di sheet STOK LAPAK / BARANG_MASUK. Dipecah per Invoice, bukan per Grade.")
+
+    def _cutoff_tanggal_stok(tujuan):
+        hari = 7 if str(tujuan).strip().upper() == "GDC" else 14
+        return pd.Timestamp.now().normalize() - pd.Timedelta(days=hari)
 
     frames_stok = []
     stok_warnings = []
 
-    if df_stok_lapak_raw.empty:
+    if df_stok_lapak_invoice_raw.empty:
         stok_warnings.append("Sheet 'STOK LAPAK' kosong atau tidak ditemukan.")
-    elif not all(c in df_stok_lapak_raw.columns for c in ["TUJUAN", "STOK LAPAK"]):
-        stok_warnings.append("Kolom 'TUJUAN' dan/atau 'STOK LAPAK' tidak ditemukan di sheet STOK LAPAK.")
+    elif not all(c in df_stok_lapak_invoice_raw.columns for c in ["TUJUAN", "STOK LAPAK", "INVOICE", "Tanggal_Lengkap"]):
+        stok_warnings.append("Kolom 'TUJUAN'/'STOK LAPAK'/'INVOICE'/Tanggal tidak lengkap di sheet STOK LAPAK.")
     else:
-        tmp_sl = df_stok_lapak_raw[df_stok_lapak_raw["TUJUAN"].apply(is_filled)].copy()
+        tmp_sl = df_stok_lapak_invoice_raw[df_stok_lapak_invoice_raw["TUJUAN"].apply(is_filled)].copy()
+        tmp_sl = tmp_sl[tmp_sl["Tanggal_Lengkap"] >= tmp_sl["TUJUAN"].apply(_cutoff_tanggal_stok)]
         tmp_sl["Tipe"] = "Lapak"
         tmp_sl["Stok (KG)"] = tmp_sl["STOK LAPAK"]
-        if "GRADE" not in tmp_sl.columns:
-            tmp_sl["GRADE"] = "-"
-        frames_stok.append(tmp_sl[["Tipe", "TUJUAN", "GRADE", "Stok (KG)"]])
+        frames_stok.append(tmp_sl[["Tipe", "TUJUAN", "INVOICE", "Stok (KG)"]])
 
-    if df_stok_gudang_raw.empty:
-        stok_warnings.append("Sheet 'STOK GUDANG' kosong atau tidak ditemukan.")
-    elif not all(c in df_stok_gudang_raw.columns for c in ["TUJUAN", "STOK GUDANG"]):
-        stok_warnings.append("Kolom 'TUJUAN' dan/atau 'STOK GUDANG' tidak ditemukan di sheet STOK GUDANG.")
+    if df_barang_masuk_raw.empty:
+        stok_warnings.append("Sheet 'BARANG_MASUK' kosong atau tidak ditemukan.")
+    elif not all(c in df_barang_masuk_raw.columns for c in ["TUJUAN", "STOK GUDANG", "INVOICE", "Tanggal_Lengkap"]):
+        stok_warnings.append("Kolom 'TUJUAN'/'STOK GUDANG'/'INVOICE'/Tanggal tidak lengkap di sheet BARANG_MASUK.")
     else:
-        tmp_sg = df_stok_gudang_raw[
-            df_stok_gudang_raw["TUJUAN"].apply(is_filled)
-            & df_stok_gudang_raw["TUJUAN"].astype(str).str.strip().str.upper().isin(["GDC", "GDM"])
+        tmp_sg = df_barang_masuk_raw[
+            df_barang_masuk_raw["TUJUAN"].apply(is_filled)
+            & df_barang_masuk_raw["TUJUAN"].astype(str).str.strip().str.upper().isin(["GDC", "GDM"])
         ].copy()
+        tmp_sg = tmp_sg[tmp_sg["Tanggal_Lengkap"] >= tmp_sg["TUJUAN"].apply(_cutoff_tanggal_stok)]
         tmp_sg["Tipe"] = "Gudang"
         tmp_sg["Stok (KG)"] = tmp_sg["STOK GUDANG"]
-        if "GRADE" not in tmp_sg.columns:
-            tmp_sg["GRADE"] = "-"
-        frames_stok.append(tmp_sg[["Tipe", "TUJUAN", "GRADE", "Stok (KG)"]])
+        frames_stok.append(tmp_sg[["Tipe", "TUJUAN", "INVOICE", "Stok (KG)"]])
 
     for _msg in stok_warnings:
         st.warning(_msg)
@@ -2086,7 +2088,7 @@ with tab2:
         st.info("Belum ada data stok (Lapak maupun Gudang GDC/GDM) yang bisa ditampilkan.")
     else:
         df_stok_gabungan["Stok (KG)"] = to_number(df_stok_gabungan["Stok (KG)"])
-        df_stok_gabungan["GRADE"] = df_stok_gabungan["GRADE"].fillna("-").astype(str).str.strip().replace({"": "-", "nan": "-", "None": "-"})
+        df_stok_gabungan["INVOICE"] = df_stok_gabungan["INVOICE"].fillna("-").astype(str).str.strip().replace({"": "-", "nan": "-", "None": "-"})
 
         st.markdown(
             f'<div class="big-total">📦 Total Stok Keseluruhan: '
@@ -2105,22 +2107,22 @@ with tab2:
         else:
             df_stok_filtered = df_stok_gabungan[df_stok_gabungan["TUJUAN"].astype(str).isin(sel_lokasi_stok)].copy()
 
-            per_lok_grade = (
-                df_stok_filtered.groupby(["Tipe", "TUJUAN", "GRADE"])["Stok (KG)"]
+            per_lok_invoice = (
+                df_stok_filtered.groupby(["Tipe", "TUJUAN", "INVOICE"])["Stok (KG)"]
                 .sum().reset_index()
             )
 
             total_per_lokasi = (
-                per_lok_grade.groupby("TUJUAN")["Stok (KG)"].sum()
+                per_lok_invoice.groupby("TUJUAN")["Stok (KG)"].sum()
                 .sort_values(ascending=False)
             )
             urutan_lokasi_stok = total_per_lokasi.index.tolist()
 
-            st.metric("Total Stok (Lokasi Terpilih)", f"{per_lok_grade['Stok (KG)'].sum():,.1f} KG")
+            st.metric("Total Stok (Lokasi Terpilih)", f"{per_lok_invoice['Stok (KG)'].sum():,.1f} KG")
 
             st.markdown("**📍 Total Stok per Lapak/Gudang**")
             tabel_total_lokasi = (
-                per_lok_grade.groupby(["Tipe", "TUJUAN"])["Stok (KG)"].sum()
+                per_lok_invoice.groupby(["Tipe", "TUJUAN"])["Stok (KG)"].sum()
                 .reset_index()
                 .sort_values("Stok (KG)", ascending=False)
                 .rename(columns={"TUJUAN": "Lokasi"})
@@ -2129,10 +2131,10 @@ with tab2:
             st.dataframe(tabel_total_lokasi, use_container_width=True, hide_index=True)
 
             fig_stok_gab = px.bar(
-                per_lok_grade, x="TUJUAN", y="Stok (KG)", color="GRADE",
+                per_lok_invoice, x="TUJUAN", y="Stok (KG)", color="INVOICE",
                 barmode="stack",
                 category_orders={"TUJUAN": urutan_lokasi_stok},
-                title="Stok per Lokasi (Lapak/Gudang), dipecah Grade",
+                title="Stok per Lokasi (Lapak/Gudang), dipecah Invoice",
                 labels={"TUJUAN": "Lokasi (Lapak/Gudang)"}
             )
             fig_stok_gab.update_layout(
@@ -2149,8 +2151,8 @@ with tab2:
             pad_yaxis(fig_stok_gab, total_per_lokasi.max() if not total_per_lokasi.empty else 0, pad=0.3)
             st.plotly_chart(fig_stok_gab, use_container_width=True)
 
-            tabel_stok_gab = per_lok_grade.sort_values(["TUJUAN", "Stok (KG)"], ascending=[True, False]).copy()
-            tabel_stok_gab = tabel_stok_gab[["Tipe", "TUJUAN", "GRADE", "Stok (KG)"]].rename(columns={"TUJUAN": "Lokasi"})
+            tabel_stok_gab = per_lok_invoice.sort_values(["TUJUAN", "Stok (KG)"], ascending=[True, False]).copy()
+            tabel_stok_gab = tabel_stok_gab[["Tipe", "TUJUAN", "INVOICE", "Stok (KG)"]].rename(columns={"TUJUAN": "Lokasi"})
             tabel_stok_gab["Stok (KG)"] = tabel_stok_gab["Stok (KG)"].apply(lambda x: f"{x:,.1f} KG")
             st.dataframe(tabel_stok_gab, use_container_width=True, hide_index=True)
 
