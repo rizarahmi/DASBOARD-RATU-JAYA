@@ -3424,12 +3424,12 @@ with tab4:
                     if "KODE" in df_rincian_pll.columns:
                         kolom_tampil_pll.append("KODE")
                     kolom_tampil_pll.append(nama_col_pll)
-                    for _c in ["Hutang", "Payment", "Sisa Hutang"]:
+                    for _c in ["Hutang", "Payment"]:
                         if _c in df_rincian_pll.columns:
                             kolom_tampil_pll.append(_c)
 
                     kolom_raw_tgl_pll = [c for c in df_rincian_pll.columns if c.strip().upper() in ["TANGGAL", "TGL", "DATE"]]
-                    kolom_exclude_pll = set(kolom_tampil_pll) | {"Tanggal_Lengkap"} | set(kolom_raw_tgl_pll)
+                    kolom_exclude_pll = set(kolom_tampil_pll) | {"Tanggal_Lengkap", "Sisa Hutang"} | set(kolom_raw_tgl_pll)
                     kolom_tampil_pll += [c for c in df_rincian_pll.columns if c not in kolom_exclude_pll and not str(c).startswith("_col_")]
 
                     sort_cols_pll = ["Tanggal_Lengkap"] if "Tanggal_Lengkap" in df_rincian_pll.columns else [nama_col_pll]
@@ -3437,7 +3437,7 @@ with tab4:
                     df_rincian_pll = df_rincian_pll.sort_values(sort_cols_pll, ascending=sort_asc_pll, na_position="last")
 
                     df_rincian_pll_tampil = df_rincian_pll[kolom_tampil_pll].copy()
-                    for _c in ["Hutang", "Payment", "Sisa Hutang"]:
+                    for _c in ["Hutang", "Payment"]:
                         if _c in df_rincian_pll_tampil.columns:
                             df_rincian_pll_tampil[_c] = df_rincian_pll_tampil[_c].map(rp)
                     st.dataframe(df_rincian_pll_tampil, use_container_width=True, hide_index=True)
