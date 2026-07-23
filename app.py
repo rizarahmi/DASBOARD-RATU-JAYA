@@ -262,6 +262,17 @@ def pad_yaxis(fig, max_value, pad: float = 0.22):
     fig.update_traces(cliponaxis=False)
     return fig
 
+def st_plotly(fig, **kwargs):
+    # Matikan drag-to-zoom & scroll-zoom di semua grafik -- kalau tidak, sentuhan/
+    # swipe tidak sengaja di HP saat scroll halaman bisa kepencet jadi aksi zoom
+    # pada grafik alih-alih scroll biasa.
+    fig.update_layout(dragmode=False)
+    config = kwargs.pop("config", {}) or {}
+    config.setdefault("scrollZoom", False)
+    config.setdefault("doubleClick", False)
+    kwargs.setdefault("use_container_width", True)
+    st.plotly_chart(fig, config=config, **kwargs)
+
 LGB_PARAMS = dict(n_estimators=500, learning_rate=0.03, max_depth=5)
 PROPHET_PARAMS = dict(yearly_seasonality=True, weekly_seasonality=True, changepoint_prior_scale=0.15)
 
@@ -1711,7 +1722,7 @@ with tab1:
             texttemplate='%{label}<br>%{percent}<br>Rp %{value:,.0f}',
             textfont_size=14
         )
-        st.plotly_chart(fig_pie_omzet, use_container_width=True)
+        st_plotly(fig_pie_omzet, use_container_width=True)
 
     with pie_col2:
         fig_pie_laba = px.pie(
@@ -1726,7 +1737,7 @@ with tab1:
             texttemplate='%{label}<br>%{percent}<br>Rp %{value:,.0f}',
             textfont_size=14
         )
-        st.plotly_chart(fig_pie_laba, use_container_width=True)
+        st_plotly(fig_pie_laba, use_container_width=True)
 
 # TAB 2: ANALISA LAPAK
 with tab2:
@@ -2131,7 +2142,7 @@ with tab2:
                     font=dict(size=12, color="#1f3864")
                 )
             pad_yaxis(fig_stok_gab, total_per_lokasi.max() if not total_per_lokasi.empty else 0, pad=0.3)
-            st.plotly_chart(fig_stok_gab, use_container_width=True)
+            st_plotly(fig_stok_gab, use_container_width=True)
 
             tabel_stok_gab = per_lok_invoice.sort_values(["TUJUAN", "Stok (KG)"], ascending=[True, False]).copy()
             tabel_stok_gab = tabel_stok_gab[["Tipe", "TUJUAN", "INVOICE", "Stok (KG)"]].rename(columns={"TUJUAN": "Lokasi"})
@@ -2239,7 +2250,7 @@ with tab2:
                 legend=dict(orientation="h", yanchor="bottom", y=1.02), height=480
             )
             pad_yaxis(fig_bar_lapak, max(per_lapak["Omzet"].max(), per_lapak["Profit"].max()) if not per_lapak.empty else 0)
-            st.plotly_chart(fig_bar_lapak, use_container_width=True)
+            st_plotly(fig_bar_lapak, use_container_width=True)
 
             fig_margin = go.Figure()
             fig_margin.add_trace(go.Bar(
@@ -2259,7 +2270,7 @@ with tab2:
                 showlegend=False, height=380
             )
             pad_yaxis(fig_margin, per_lapak["Margin_%"].max() if not per_lapak.empty else 0)
-            st.plotly_chart(fig_margin, use_container_width=True)
+            st_plotly(fig_margin, use_container_width=True)
 
             tabel_lapak = per_lapak.copy()
             tabel_lapak["Omzet"]    = per_lapak["Omzet"].apply(rp)
@@ -2306,7 +2317,7 @@ with tab2:
                 yaxis_title="Kilogram (KG)", xaxis_title="Kode Lapak"
             )
             pad_yaxis(fig_ton, max(pivot_ton["Terjual (KG)"].max(), pivot_ton["Dibuang (KG)"].max()) if not pivot_ton.empty else 0)
-            st.plotly_chart(fig_ton, use_container_width=True)
+            st_plotly(fig_ton, use_container_width=True)
 
             fig_pct_buang = go.Figure()
             fig_pct_buang.add_trace(go.Bar(
@@ -2326,7 +2337,7 @@ with tab2:
                 showlegend=False, height=360
             )
             pad_yaxis(fig_pct_buang, pivot_ton["%_Dibuang"].max() if not pivot_ton.empty else 0)
-            st.plotly_chart(fig_pct_buang, use_container_width=True)
+            st_plotly(fig_pct_buang, use_container_width=True)
 
             tabel_ton = pivot_ton.copy()
             tabel_ton["Terjual (KG)"]  = pivot_ton["Terjual (KG)"].apply(lambda x: f"{x:,.1f} KG")
@@ -2366,7 +2377,7 @@ with tab2:
                 yaxis_title="Rupiah", xaxis_title="Kode Lapak"
             )
             pad_yaxis(fig_pay, max(pay_grp["Tunai"].max(), pay_grp["Kredit"].max()) if not pay_grp.empty else 0)
-            st.plotly_chart(fig_pay, use_container_width=True)
+            st_plotly(fig_pay, use_container_width=True)
         else:
             st.info("Kolom 'Tunai' atau 'Kredit' tidak tersedia.")
 
@@ -2456,7 +2467,7 @@ with tab2:
                         font=dict(size=13, color="#1f3864")
                     )
                 pad_yaxis(fig_peng, max_total, pad=0.3)
-                st.plotly_chart(fig_peng, use_container_width=True)
+                st_plotly(fig_peng, use_container_width=True)
 
                 tabel_peng = per_lok_kat.pivot(index="LOKASI LAPAK", columns="JENIS PENGELUARAN", values="NOMINAL").fillna(0)
                 tabel_peng = tabel_peng.reindex(urutan_lokasi)
@@ -2482,7 +2493,7 @@ with tab2:
                     xaxis_title="Lokasi Lapak", yaxis_title="Rupiah", showlegend=False
                 )
                 pad_yaxis(fig_peng_simple, per_lokasi_saja["NOMINAL"].max() if not per_lokasi_saja.empty else 0)
-                st.plotly_chart(fig_peng_simple, use_container_width=True)
+                st_plotly(fig_peng_simple, use_container_width=True)
 
             st.divider()
             st.markdown("#### 📋 Rincian Pengeluaran per Lokasi")
@@ -2559,7 +2570,7 @@ with tab2:
                     xaxis_title="Grade", yaxis_title="Kilogram (KG)", showlegend=False
                 )
                 pad_yaxis(fig_grade_bar, grade_grp["Total_KG"].max() if not grade_grp.empty else 0)
-                st.plotly_chart(fig_grade_bar, use_container_width=True)
+                st_plotly(fig_grade_bar, use_container_width=True)
 
             with g2:
                 fig_grade_pie = px.pie(
@@ -2567,7 +2578,7 @@ with tab2:
                     title="Proporsi KG per Grade", hole=0.4
                 )
                 fig_grade_pie.update_traces(textinfo="label+percent", textfont_size=13)
-                st.plotly_chart(fig_grade_pie, use_container_width=True)
+                st_plotly(fig_grade_pie, use_container_width=True)
 
             grade_display = grade_grp.copy()
             grade_display["Total_KG"] = grade_display["Total_KG"].apply(lambda x: f"{x:,.1f} KG")
@@ -2615,7 +2626,7 @@ with tab2:
                     xaxis_title="Jenis", yaxis_title="Kilogram (KG)", showlegend=False
                 )
                 pad_yaxis(fig_jenis_bar, jenis_grp["Total_KG"].max() if not jenis_grp.empty else 0)
-                st.plotly_chart(fig_jenis_bar, use_container_width=True)
+                st_plotly(fig_jenis_bar, use_container_width=True)
 
             with j2:
                 fig_jenis_pie = px.pie(
@@ -2624,7 +2635,7 @@ with tab2:
                     color_discrete_sequence=px.colors.qualitative.Set2
                 )
                 fig_jenis_pie.update_traces(textinfo="label+percent", textfont_size=13)
-                st.plotly_chart(fig_jenis_pie, use_container_width=True)
+                st_plotly(fig_jenis_pie, use_container_width=True)
 
             jenis_display = jenis_grp.copy()
             jenis_display["Total_KG"] = jenis_display["Total_KG"].apply(lambda x: f"{x:,.1f} KG")
@@ -2672,7 +2683,7 @@ with tab2:
                     legend=dict(orientation="h", yanchor="bottom", y=1.02),
                     height=500
                 )
-                st.plotly_chart(fig_gabungan, use_container_width=True)
+                st_plotly(fig_gabungan, use_container_width=True)
 
                 pivot_gab = gabungan_grp.pivot(index="Jenis", columns="Grade", values="Total_KG").fillna(0)
                 pivot_display = pivot_gab.copy()
@@ -2920,7 +2931,7 @@ with tab2b:
                 xaxis_tickangle=-30
             )
             pad_yaxis(fig_bar_pelanggan, max(per_pelanggan["Omzet"].max(), per_pelanggan["Profit"].max()) if not per_pelanggan.empty else 0)
-            st.plotly_chart(fig_bar_pelanggan, use_container_width=True)
+            st_plotly(fig_bar_pelanggan, use_container_width=True)
 
             fig_margin_luar = go.Figure()
             fig_margin_luar.add_trace(go.Bar(
@@ -2940,7 +2951,7 @@ with tab2b:
                 showlegend=False, height=380, xaxis_tickangle=-30
             )
             pad_yaxis(fig_margin_luar, per_pelanggan["Margin_%"].max() if not per_pelanggan.empty else 0)
-            st.plotly_chart(fig_margin_luar, use_container_width=True)
+            st_plotly(fig_margin_luar, use_container_width=True)
 
             tabel_pelanggan = per_pelanggan.copy()
             tabel_pelanggan["Omzet"]    = per_pelanggan["Omzet"].apply(rp)
@@ -2977,7 +2988,7 @@ with tab2b:
                 yaxis_title="Rupiah", xaxis_title="Nama Pelanggan", xaxis_tickangle=-30
             )
             pad_yaxis(fig_pay_luar, max(pay_grp_luar["Tunai"].max(), pay_grp_luar["Kredit"].max()) if not pay_grp_luar.empty else 0)
-            st.plotly_chart(fig_pay_luar, use_container_width=True)
+            st_plotly(fig_pay_luar, use_container_width=True)
             st.divider()
 
         if has_jenis_luar and has_kg_luar:
@@ -3011,7 +3022,7 @@ with tab2b:
                     xaxis_title="Jenis", yaxis_title="Kilogram (KG)", showlegend=False
                 )
                 pad_yaxis(fig_jenis_bar_luar, jenis_grp_luar["Total_KG"].max() if not jenis_grp_luar.empty else 0)
-                st.plotly_chart(fig_jenis_bar_luar, use_container_width=True)
+                st_plotly(fig_jenis_bar_luar, use_container_width=True)
 
             with jl2:
                 fig_jenis_pie_luar = px.pie(
@@ -3020,7 +3031,7 @@ with tab2b:
                     color_discrete_sequence=px.colors.qualitative.Set2
                 )
                 fig_jenis_pie_luar.update_traces(textinfo="label+percent", textfont_size=13)
-                st.plotly_chart(fig_jenis_pie_luar, use_container_width=True)
+                st_plotly(fig_jenis_pie_luar, use_container_width=True)
 
             jenis_display_luar = jenis_grp_luar.copy()
             jenis_display_luar["Total_KG"] = jenis_display_luar["Total_KG"].apply(lambda x: f"{x:,.1f} KG")
@@ -3065,7 +3076,7 @@ with tab2b:
                     legend=dict(orientation="h", yanchor="bottom", y=1.02),
                     height=500
                 )
-                st.plotly_chart(fig_gabungan_luar, use_container_width=True)
+                st_plotly(fig_gabungan_luar, use_container_width=True)
 
                 pivot_gab_luar = gabungan_grp_luar.pivot(index="Jenis", columns="Grade", values="Total_KG").fillna(0)
                 pivot_display_luar = pivot_gab_luar.copy()
@@ -3238,7 +3249,7 @@ with tab4:
                 xaxis_tickangle=-30, showlegend=False
             )
             pad_yaxis(fig_sisa, sisa_grp["Sisa Hutang"].max() if not sisa_grp.empty else 0)
-            st.plotly_chart(fig_sisa, use_container_width=True)
+            st_plotly(fig_sisa, use_container_width=True)
 
     with piutang_tab1:
         _render_piutang_tab(df_piutang_raw, df_piutang_filtered, "Pelanggan Lapak")
@@ -3302,7 +3313,7 @@ with tab4:
                             xaxis_tickangle=-30, showlegend=False, height=450
                         )
                         pad_yaxis(fig_nama_pl, top_nama_pl["Sisa_Hutang"].max() if not top_nama_pl.empty else 0)
-                        st.plotly_chart(fig_nama_pl, use_container_width=True)
+                        st_plotly(fig_nama_pl, use_container_width=True)
 
                         tabel_nama_pl = per_nama_pl.copy()
                         rename_pl = {nama_col_pl: "Nama Pelanggan", "Sisa_Hutang": "Sisa Piutang"}
@@ -3368,7 +3379,7 @@ with tab4:
                     xaxis_tickangle=-30, showlegend=False
                 )
                 pad_yaxis(fig_per_nama, per_nama["Sisa_Hutang"].max() if not per_nama.empty else 0)
-                st.plotly_chart(fig_per_nama, use_container_width=True)
+                st_plotly(fig_per_nama, use_container_width=True)
 
                 tabel_nama = per_nama.copy()
                 rename_nama = {nama_col_pll: "Nama Pelanggan", "Sisa_Hutang": "Sisa Piutang"}
@@ -3510,21 +3521,23 @@ with tab6:
         keluar_kas = df_kas["KAS KELUAR"].sum() if "KAS KELUAR" in df_kas.columns else 0
         saldo_kas  = df_kas["SALDO"].dropna().iloc[-1] if "SALDO" in df_kas.columns and not df_kas["SALDO"].dropna().empty else 0
 
-        k1, k2, k3, k4, k5, k6 = st.columns(6)
-        k1.metric("🏦 Saldo Terakhir",   rp(saldo_kas))
-        k2.metric("🏛️ Saldo BRI",        rp(saldo_bank_raw.get("bri")) if saldo_bank_raw.get("bri") is not None else "-")
-        k3.metric("🏛️ Saldo BCA",        rp(saldo_bank_raw.get("bca")) if saldo_bank_raw.get("bca") is not None else "-")
-        k4.metric("🟩 Total Kas Masuk",  rp(masuk_kas))
-        k5.metric("🟥 Total Kas Keluar", rp(keluar_kas))
-        k6.metric("📊 Selisih Bersih",   rp(masuk_kas - keluar_kas))
+        k1, k2, k3 = st.columns(3)
+        k1.metric("🏦 Saldo Terakhir",   rp_short(saldo_kas))
+        k2.metric("🏛️ Saldo BRI",        rp_short(saldo_bank_raw.get("bri")) if saldo_bank_raw.get("bri") is not None else "-")
+        k3.metric("🏛️ Saldo BCA",        rp_short(saldo_bank_raw.get("bca")) if saldo_bank_raw.get("bca") is not None else "-")
+
+        k4, k5, k6 = st.columns(3)
+        k4.metric("🟩 Total Kas Masuk",  rp_short(masuk_kas))
+        k5.metric("🟥 Total Kas Keluar", rp_short(keluar_kas))
+        k6.metric("📊 Selisih Bersih",   rp_short(masuk_kas - keluar_kas))
 
         st.divider()
 
-        section_heading("🔎 Total Arus Kas per Jenis (Filter)")
+        section_heading("🔎 Arus Kas per Jenis (Filter)")
         if "JENIS" in df_kas.columns:
             jenis_opts_top = sorted(df_kas["JENIS"].dropna().unique())
             sel_jenis_top = st.multiselect(
-                "Pilih Jenis untuk ditampilkan totalnya", jenis_opts_top, default=jenis_opts_top, key="tab6_jenis_top"
+                "Pilih Jenis", jenis_opts_top, default=jenis_opts_top, key="tab6_jenis_top"
             )
             df_kas_jenis_top = df_kas[df_kas["JENIS"].isin(sel_jenis_top)] if sel_jenis_top else df_kas.iloc[0:0]
             masuk_top  = df_kas_jenis_top["KAS MASUK"].sum()  if "KAS MASUK"  in df_kas_jenis_top.columns else 0
@@ -3533,18 +3546,14 @@ with tab6:
             t1.metric("Kas Masuk (Jenis Terpilih)",  rp(masuk_top))
             t2.metric("Kas Keluar (Jenis Terpilih)", rp(keluar_top))
             t3.metric("Selisih",                      rp(masuk_top - keluar_top))
+            df_kas_show = df_kas_jenis_top
         else:
             st.info("Kolom 'JENIS' tidak tersedia di sheet Arus Kas.")
+            df_kas_show = df_kas.copy()
 
         st.divider()
 
         st.markdown("#### 🔍 Rincian Transaksi per Jenis")
-        if "JENIS" in df_kas.columns:
-            jenis_kas_all = sorted(df_kas["JENIS"].dropna().unique())
-            sel_jenis_kas6 = st.multiselect("Filter Jenis", jenis_kas_all, default=jenis_kas_all, key="tab6_jenis")
-            df_kas_show = df_kas[df_kas["JENIS"].isin(sel_jenis_kas6)] if sel_jenis_kas6 else df_kas.copy()
-        else:
-            df_kas_show = df_kas.copy()
         st.dataframe(format_money_table(df_kas_show.drop(columns=["Tanggal_Kas"], errors="ignore"), extra_keywords=["KAS", "SALDO", "MASUK", "KELUAR"]), use_container_width=True, hide_index=True)
 
         st.markdown("#### 📊 Ringkasan per Jenis")
@@ -3573,7 +3582,7 @@ with tab6:
                 yaxis_title="Rupiah", xaxis_title="Jenis", xaxis_tickangle=-35
             )
             pad_yaxis(fig_jenis, max(grp_jenis_kas["Masuk"].max(), grp_jenis_kas["Keluar"].max()) if not grp_jenis_kas.empty else 0)
-            st.plotly_chart(fig_jenis, use_container_width=True)
+            st_plotly(fig_jenis, use_container_width=True)
 
             grp_display = grp_jenis_kas.copy()
             grp_display["Masuk"]   = grp_display["Masuk"].apply(rp)
@@ -3608,7 +3617,7 @@ with tab6:
             )
             fig_kas.update_xaxes(type="category")
             pad_yaxis(fig_kas, max(kas_bulanan["Masuk"].max(), kas_bulanan["Keluar"].max()) if not kas_bulanan.empty else 0)
-            st.plotly_chart(fig_kas, use_container_width=True)
+            st_plotly(fig_kas, use_container_width=True)
             st.caption("Grafik ini selalu menampilkan semua bulan, tidak mengikuti filter rentang tanggal di sidebar.")
 
 # TAB 7: EKSPEDISI
@@ -3657,7 +3666,7 @@ with tab7:
                 yaxis_title="Rupiah", xaxis_title="Nama Driver"
             )
             pad_yaxis(fig_nama, max(grp_nama["Pendapatan"].max(), grp_nama["Pengeluaran"].max()) if not grp_nama.empty else 0)
-            st.plotly_chart(fig_nama, use_container_width=True)
+            st_plotly(fig_nama, use_container_width=True)
 
             grp_display_eks = grp_nama.copy()
             grp_display_eks["Pendapatan"]  = grp_nama["Pendapatan"].apply(rp)
@@ -3685,7 +3694,7 @@ with tab7:
                         title="Komposisi Pendapatan per Keterangan (Top 8)", hole=0.35
                     )
                     fig_pie_ket.update_traces(textinfo="label+percent")
-                    st.plotly_chart(fig_pie_ket, use_container_width=True)
+                    st_plotly(fig_pie_ket, use_container_width=True)
 
             with col_ket2:
                 top_ket_peng = grp_ket[grp_ket["Pengeluaran"] > 0].head(8)
@@ -3696,7 +3705,7 @@ with tab7:
                         hole=0.35, color_discrete_sequence=px.colors.sequential.RdBu
                     )
                     fig_pie_peng.update_traces(textinfo="label+percent")
-                    st.plotly_chart(fig_pie_peng, use_container_width=True)
+                    st_plotly(fig_pie_peng, use_container_width=True)
 
         st.divider()
         st.markdown("#### 📄 Detail Semua Transaksi Ekspedisi")
@@ -3741,7 +3750,7 @@ with tab7:
             )
             fig_eks.update_xaxes(type="category")
             pad_yaxis(fig_eks, max(eks_bulanan["Pendapatan"].max(), eks_bulanan["Pengeluaran"].max()) if not eks_bulanan.empty else 0)
-            st.plotly_chart(fig_eks, use_container_width=True)
+            st_plotly(fig_eks, use_container_width=True)
             st.caption("Grafik ini selalu menampilkan semua bulan, tidak mengikuti filter rentang tanggal di sidebar.")
 
 # TAB 8: KERUGIAN GUDANG
@@ -3926,7 +3935,7 @@ with tab9:
                         margin=dict(l=40, r=40, t=20, b=40),
                         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
                     )
-                    st.plotly_chart(fig_main, use_container_width=True)
+                    st_plotly(fig_main, use_container_width=True)
 
                 with pred_tab_yoy:
                     st.subheader("Analisis Musiman Berdasarkan Periode Tahunan (Overlay Tahun ke Tahun)")
@@ -3950,7 +3959,7 @@ with tab9:
                     )
                     fig_yoy.update_xaxes(tickformat="%d %b", dtick="M1")
                     fig_yoy.update_layout(hovermode="closest", margin=dict(l=40, r=40, t=20, b=40))
-                    st.plotly_chart(fig_yoy, use_container_width=True)
+                    st_plotly(fig_yoy, use_container_width=True)
 
                     st.markdown("##### 📉 Return Harian (%) Antar Tahun")
                     st.caption("Persentase perubahan harga dari hari sebelumnya — makin lebar lonjakannya, makin tinggi volatilitas di periode itu.")
@@ -3968,7 +3977,7 @@ with tab9:
                     fig_return.add_hline(y=0, line_dash="dot", line_color="gray")
                     fig_return.update_xaxes(tickformat="%d %b", dtick="M1")
                     fig_return.update_layout(hovermode="closest", margin=dict(l=40, r=40, t=20, b=40))
-                    st.plotly_chart(fig_return, use_container_width=True)
+                    st_plotly(fig_return, use_container_width=True)
 
                     st.markdown("##### 📊 Ringkasan Volatilitas Return per Tahun")
                     dfp_ret_summary = (
@@ -4003,11 +4012,6 @@ with tab9:
 # TAB 10: NET INCOME
 with tab10:
     st.markdown("### 🧮 Net Income (Laba Bersih)")
-    st.caption(
-        "Net Income dihitung dari **Total Laba** (Lapak + Lapak Luar + Ekspedisi + Tanaman Panen) "
-        "dikurangi **Pengeluaran Arus Kas** dari kategori Kantor, Beban, Angsuran Mobil, Gaji Kantor, "
-        "dan Barang Kantor. Mengikuti filter rentang tanggal di sidebar."
-    )
 
     URUTAN_PENCOCOKAN = [
         ("Angsuran Mobil", ["ANGSURAN MOBIL", "CICILAN MOBIL"]),
@@ -4112,7 +4116,7 @@ with tab10:
         yaxis_title="Rupiah", showlegend=False, height=480,
         yaxis_tickformat=","
     )
-    st.plotly_chart(fig_wf, use_container_width=True)
+    st_plotly(fig_wf, use_container_width=True)
 
     st.divider()
 
