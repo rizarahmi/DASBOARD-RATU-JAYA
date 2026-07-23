@@ -3521,15 +3521,27 @@ with tab6:
         keluar_kas = df_kas["KAS KELUAR"].sum() if "KAS KELUAR" in df_kas.columns else 0
         saldo_kas  = df_kas["SALDO"].dropna().iloc[-1] if "SALDO" in df_kas.columns and not df_kas["SALDO"].dropna().empty else 0
 
-        k1, k2, k3 = st.columns(3)
-        k1.metric("🏦 Saldo Terakhir",   rp_short(saldo_kas))
-        k2.metric("🏛️ Saldo BRI",        rp_short(saldo_bank_raw.get("bri")) if saldo_bank_raw.get("bri") is not None else "-")
-        k3.metric("🏛️ Saldo BCA",        rp_short(saldo_bank_raw.get("bca")) if saldo_bank_raw.get("bca") is not None else "-")
+        col_saldo, col_bank = st.columns([1, 2])
+        with col_saldo:
+            st.metric("🏦 Saldo Terakhir", rp(saldo_kas))
+        with col_bank:
+            bri_val = rp(saldo_bank_raw.get("bri")) if saldo_bank_raw.get("bri") is not None else "-"
+            bca_val = rp(saldo_bank_raw.get("bca")) if saldo_bank_raw.get("bca") is not None else "-"
+            st.markdown(f"""<table style="width:100%; border-collapse:collapse; text-align:center; margin-top:4px;">
+<tr>
+<th style="background:#2ca02c; color:#fff; padding:8px 10px; border:1px solid #cfe0cf; font-size:14px;">🏛️ SALDO BRI</th>
+<th style="background:#2ca02c; color:#fff; padding:8px 10px; border:1px solid #cfe0cf; font-size:14px;">🏛️ SALDO BCA</th>
+</tr>
+<tr>
+<td style="padding:10px; border:1px solid #e0e6f0; font-weight:800; font-size:20px; color:#1f3864;">{bri_val}</td>
+<td style="padding:10px; border:1px solid #e0e6f0; font-weight:800; font-size:20px; color:#1f3864;">{bca_val}</td>
+</tr>
+</table>""", unsafe_allow_html=True)
 
         k4, k5, k6 = st.columns(3)
-        k4.metric("🟩 Total Kas Masuk",  rp_short(masuk_kas))
-        k5.metric("🟥 Total Kas Keluar", rp_short(keluar_kas))
-        k6.metric("📊 Selisih Bersih",   rp_short(masuk_kas - keluar_kas))
+        k4.metric("🟩 Total Kas Masuk",  rp(masuk_kas))
+        k5.metric("🟥 Total Kas Keluar", rp(keluar_kas))
+        k6.metric("📊 Selisih Bersih",   rp(masuk_kas - keluar_kas))
 
         st.divider()
 
