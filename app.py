@@ -650,6 +650,25 @@ def load_arus_kas() -> pd.DataFrame:
         df["JENIS"] = df["JENIS"].astype(str).str.strip().str.upper()
     return df
 
+@st.cache_data(ttl=300, show_spinner=False)
+def load_saldo_bank() -> dict:
+    # Saldo BRI (kolom J baris 3) & Saldo BCA (kolom K baris 3) di sheet ARUS KAS
+    # -- sel lepas di luar tabel transaksi utama, bukan bagian dari header row 1,
+    # jadi dibaca langsung by posisi (header=None) tanpa lewat fetch_clean_csv/
+    # fetch_raw_csv supaya baris tidak ikut ter-drop/bergeser oleh proses cleaning.
+    encoded = urllib.parse.quote(SHEET_ARUS_KAS)
+    url = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/gviz/tq?tqx=out:csv&sheet={encoded}"
+    try:
+        df_raw = pd.read_csv(url, dtype=str, header=None)
+    except Exception:
+        return {"bri": None, "bca": None}
+    try:
+        saldo_bri = to_number(pd.Series([df_raw.iat[2, 9]])).iloc[0] if df_raw.shape[0] > 2 and df_raw.shape[1] > 9 else None
+        saldo_bca = to_number(pd.Series([df_raw.iat[2, 10]])).iloc[0] if df_raw.shape[0] > 2 and df_raw.shape[1] > 10 else None
+    except Exception:
+        saldo_bri, saldo_bca = None, None
+    return {"bri": saldo_bri, "bca": saldo_bca}
+
 @st.cache_data(ttl=300, show_spinner="Memuat Pengeluaran Lapak...")
 def load_pengeluaran_lapak() -> pd.DataFrame:
     df = fetch_clean_csv(SHEET_PENGELUARAN)
@@ -1428,6 +1447,11 @@ except Exception as e:
     st.stop()
 
 try:
+    saldo_bank_raw = load_saldo_bank()
+except Exception:
+    saldo_bank_raw = {"bri": None, "bca": None}
+
+try:
     df_gh_bahan_raw     = load_gh_bahan()
     df_gh_pemupukan_raw = load_gh_pemupukan()
     df_gh_tenaga_raw    = load_gh_tenaga()
@@ -1669,13 +1693,6 @@ with tab1:
         tp3.metric("Laba Tanaman Panen",     rp(laba_tanaman))
         if not _omzet_col_tp:
             st.caption("⚠️ Kolom Omzet tidak ditemukan di sheet 'TANAMAN PANEN'.")
-        else:
-            st.caption("Laba = Omzet − Total Biaya Berjalan Bulanan (kolom O-P sheet 'TANAMAN BELUM PANEN'). Omzet & Biaya Berjalan Bulanan mengikuti filter rentang tanggal sidebar (biaya dicocokkan berdasarkan bulan).")
-        if not df_biaya_bulanan.empty:
-            with st.expander("📅 Rincian Biaya Berjalan per Bulan (sesuai filter)"):
-                _tbl_bb = df_biaya_bulanan[["BULAN", "BIAYA BERJALAN"]].copy()
-                _tbl_bb["BIAYA BERJALAN"] = df_biaya_bulanan["BIAYA BERJALAN"].apply(rp)
-                st.dataframe(_tbl_bb, use_container_width=True, hide_index=True)
 
     st.divider()
     section_heading("📊 Komposisi Omzet & Laba Keseluruhan")
@@ -1710,40 +1727,6 @@ with tab1:
             textfont_size=14
         )
         st.plotly_chart(fig_pie_laba, use_container_width=True)
-
-    has_trend_lapak = not df_penjualan.empty and "Tanggal_Lengkap" in df_penjualan.columns and "Total harga" in df_penjualan.columns
-    has_trend_luar  = not df_penjualan_luar.empty and "Tanggal_Lengkap" in df_penjualan_luar.columns and "Total harga" in df_penjualan_luar.columns
-
-    if has_trend_lapak or has_trend_luar:
-        section_heading("📅 Tren Omzet Bulanan")
-        dfs_trend = []
-        if has_trend_lapak:
-            tmp = df_penjualan.copy()
-            tmp["Sumber"] = "Lapak"
-            dfs_trend.append(tmp)
-        if has_trend_luar:
-            tmp2 = df_penjualan_luar.copy()
-            tmp2["Sumber"] = "Lapak Luar"
-            dfs_trend.append(tmp2)
-        df_all_penjualan = pd.concat(dfs_trend, ignore_index=True)
-        df_all_penjualan["Bulan_Label"] = df_all_penjualan["Tanggal_Lengkap"].dt.to_period("M").astype(str)
-        bulanan_trend = df_all_penjualan.groupby(["Bulan_Label", "Sumber"]).agg(
-            Omzet=("Total harga", "sum"),
-            Laba=("Keuntungan", "sum")
-        ).reset_index()
-
-        fig_trend = px.bar(
-            bulanan_trend, x="Bulan_Label", y="Omzet", color="Sumber",
-            barmode="group",
-            title="Tren Omzet Bulanan (Lapak & Lapak Luar)",
-            text=bulanan_trend["Omzet"].apply(rp_short),
-            color_discrete_map={"Lapak": "#1f77b4", "Lapak Luar": "#17becf"}
-        )
-        fig_trend.update_traces(textposition="outside", textfont_size=11)
-        max_trend = bulanan_trend["Omzet"].max() if not bulanan_trend.empty else 0
-        pad_yaxis(fig_trend, max_trend)
-        fig_trend.update_layout(height=420, yaxis_tickformat=",")
-        st.plotly_chart(fig_trend, use_container_width=True)
 
 # TAB 2: ANALISA LAPAK
 with tab2:
@@ -2045,7 +2028,6 @@ with tab2:
     st.divider()
 
     section_heading("📦 Stok Lapak & Gudang")
-    st.caption("📌 Stok dihitung dari invoice 14 hari terakhir (khusus GDC: 7 hari terakhir), berdasarkan tanggal di sheet STOK LAPAK / BARANG_MASUK. Dipecah per Invoice, bukan per Grade.")
 
     def _cutoff_tanggal_stok(tujuan):
         hari = 7 if str(tujuan).strip().upper() == "GDC" else 14
@@ -3199,8 +3181,6 @@ with tab3:
             else:
                 panen_s3.info("Kolom Luas (Ha) tidak ditemukan")
 
-            st.caption("Omzet & Laba mengikuti filter rentang tanggal sidebar (kolom Tanggal Panen). Total Luas Panen selalu menampilkan keseluruhan data (tidak difilter). Tabel di bawah menampilkan seluruh data (tidak difilter).")
-            st.markdown(f"**Total Lahan Panen: {len(df_tanaman_sudah)} baris**")
             st.dataframe(format_money_table(df_tanaman_sudah), use_container_width=True, hide_index=True)
         else:
             st.info("Data sheet 'TANAMAN PANEN' kosong atau tidak ditemukan.")
@@ -3530,11 +3510,13 @@ with tab6:
         keluar_kas = df_kas["KAS KELUAR"].sum() if "KAS KELUAR" in df_kas.columns else 0
         saldo_kas  = df_kas["SALDO"].dropna().iloc[-1] if "SALDO" in df_kas.columns and not df_kas["SALDO"].dropna().empty else 0
 
-        k1, k2, k3, k4 = st.columns(4)
+        k1, k2, k3, k4, k5, k6 = st.columns(6)
         k1.metric("🏦 Saldo Terakhir",   rp(saldo_kas))
-        k2.metric("🟩 Total Kas Masuk",  rp(masuk_kas))
-        k3.metric("🟥 Total Kas Keluar", rp(keluar_kas))
-        k4.metric("📊 Selisih Bersih",   rp(masuk_kas - keluar_kas))
+        k2.metric("🏛️ Saldo BRI",        rp(saldo_bank_raw.get("bri")) if saldo_bank_raw.get("bri") is not None else "-")
+        k3.metric("🏛️ Saldo BCA",        rp(saldo_bank_raw.get("bca")) if saldo_bank_raw.get("bca") is not None else "-")
+        k4.metric("🟩 Total Kas Masuk",  rp(masuk_kas))
+        k5.metric("🟥 Total Kas Keluar", rp(keluar_kas))
+        k6.metric("📊 Selisih Bersih",   rp(masuk_kas - keluar_kas))
 
         st.divider()
 
@@ -3556,34 +3538,6 @@ with tab6:
 
         st.divider()
 
-        if "Tanggal_Kas" in df_kas.columns:
-            df_kas_plot = df_kas.copy()
-            df_kas_plot["Bulan_Label"] = df_kas_plot["Tanggal_Kas"].dt.to_period("M").astype(str)
-            kas_bulanan = df_kas_plot.groupby("Bulan_Label").agg(
-                Masuk=("KAS MASUK", "sum"), Keluar=("KAS KELUAR", "sum")
-            ).reset_index()
-
-            fig_kas = go.Figure()
-            fig_kas.add_trace(go.Bar(
-                name="Kas Masuk", x=kas_bulanan["Bulan_Label"], y=kas_bulanan["Masuk"],
-                marker_color="#2ca02c",
-                text=[rp_short(v) for v in kas_bulanan["Masuk"]],
-                textposition="outside", textfont=dict(size=11)
-            ))
-            fig_kas.add_trace(go.Bar(
-                name="Kas Keluar", x=kas_bulanan["Bulan_Label"], y=kas_bulanan["Keluar"],
-                marker_color="#d62728",
-                text=[rp_short(v) for v in kas_bulanan["Keluar"]],
-                textposition="outside", textfont=dict(size=11)
-            ))
-            fig_kas.update_layout(
-                barmode="group", title="Kas Masuk vs Kas Keluar per Bulan",
-                yaxis_title="Rupiah", xaxis_title="Bulan"
-            )
-            pad_yaxis(fig_kas, max(kas_bulanan["Masuk"].max(), kas_bulanan["Keluar"].max()) if not kas_bulanan.empty else 0)
-            st.plotly_chart(fig_kas, use_container_width=True)
-
-        st.divider()
         st.markdown("#### 🔍 Rincian Transaksi per Jenis")
         if "JENIS" in df_kas.columns:
             jenis_kas_all = sorted(df_kas["JENIS"].dropna().unique())
@@ -3627,6 +3581,36 @@ with tab6:
             grp_display["Selisih"] = grp_jenis_kas["Selisih"].apply(rp)
             st.dataframe(grp_display, use_container_width=True, hide_index=True)
 
+        if not df_kas_raw.empty and "Tanggal_Kas" in df_kas_raw.columns:
+            st.divider()
+            df_kas_plot = df_kas_raw.copy()
+            df_kas_plot["Bulan_Label"] = df_kas_plot["Tanggal_Kas"].dt.to_period("M").astype(str)
+            kas_bulanan = df_kas_plot.groupby("Bulan_Label").agg(
+                Masuk=("KAS MASUK", "sum"), Keluar=("KAS KELUAR", "sum")
+            ).reset_index().sort_values("Bulan_Label")
+
+            fig_kas = go.Figure()
+            fig_kas.add_trace(go.Bar(
+                name="Kas Masuk", x=kas_bulanan["Bulan_Label"], y=kas_bulanan["Masuk"],
+                marker_color="#2ca02c",
+                text=[rp_short(v) for v in kas_bulanan["Masuk"]],
+                textposition="outside", textfont=dict(size=11)
+            ))
+            fig_kas.add_trace(go.Bar(
+                name="Kas Keluar", x=kas_bulanan["Bulan_Label"], y=kas_bulanan["Keluar"],
+                marker_color="#d62728",
+                text=[rp_short(v) for v in kas_bulanan["Keluar"]],
+                textposition="outside", textfont=dict(size=11)
+            ))
+            fig_kas.update_layout(
+                barmode="group", title="Kas Masuk vs Kas Keluar per Bulan (Seluruh Data, Tidak Difilter)",
+                yaxis_title="Rupiah", xaxis_title="Bulan"
+            )
+            fig_kas.update_xaxes(type="category")
+            pad_yaxis(fig_kas, max(kas_bulanan["Masuk"].max(), kas_bulanan["Keluar"].max()) if not kas_bulanan.empty else 0)
+            st.plotly_chart(fig_kas, use_container_width=True)
+            st.caption("Grafik ini selalu menampilkan semua bulan, tidak mengikuti filter rentang tanggal di sidebar.")
+
 # TAB 7: EKSPEDISI
 with tab7:
     st.markdown("### 🚛 Operasional Ekspedisi")
@@ -3643,42 +3627,6 @@ with tab7:
         e2.metric("💸 Total Pengeluaran", rp(pengl_eks))
         e3.metric("📈 Laba Bersih",       rp(laba_eks),
                   delta=f"{(laba_eks/pend_eks*100):.1f}%" if pend_eks > 0 else None)
-
-        st.divider()
-
-        if not df_ekspedisi_raw.empty and "Tanggal_Lengkap" in df_ekspedisi_raw.columns:
-            df_eks_plot = df_ekspedisi_raw.copy()
-            df_eks_plot["Bulan_Label"] = df_eks_plot["Tanggal_Lengkap"].dt.to_period("M").astype(str)
-            eks_bulanan = df_eks_plot.groupby("Bulan_Label").agg(
-                Pendapatan=("PENDAPATAN", "sum"), Pengeluaran=("PENGELUARAN", "sum")
-            ).reset_index().sort_values("Bulan_Label")
-            eks_bulanan["Laba"] = eks_bulanan["Pendapatan"] - eks_bulanan["Pengeluaran"]
-
-            fig_eks = go.Figure()
-            fig_eks.add_trace(go.Bar(
-                name="Pendapatan", x=eks_bulanan["Bulan_Label"], y=eks_bulanan["Pendapatan"],
-                marker_color="#1f77b4",
-                text=[rp_short(v) for v in eks_bulanan["Pendapatan"]],
-                textposition="outside", textfont=dict(size=11)
-            ))
-            fig_eks.add_trace(go.Bar(
-                name="Pengeluaran", x=eks_bulanan["Bulan_Label"], y=eks_bulanan["Pengeluaran"],
-                marker_color="#d62728",
-                text=[rp_short(v) for v in eks_bulanan["Pengeluaran"]],
-                textposition="outside", textfont=dict(size=11)
-            ))
-            fig_eks.add_trace(go.Scatter(
-                name="Laba Bersih", x=eks_bulanan["Bulan_Label"], y=eks_bulanan["Laba"],
-                mode="lines+markers", line=dict(color="#ff7f0e", width=2), marker=dict(size=8)
-            ))
-            fig_eks.update_layout(
-                barmode="group",
-                title="Pendapatan vs Pengeluaran Ekspedisi per Bulan (Seluruh Data, Tidak Difilter)",
-                yaxis_title="Rupiah", xaxis_title="Bulan"
-            )
-            pad_yaxis(fig_eks, max(eks_bulanan["Pendapatan"].max(), eks_bulanan["Pengeluaran"].max()) if not eks_bulanan.empty else 0)
-            st.plotly_chart(fig_eks, use_container_width=True)
-            st.caption("Grafik ini selalu menampilkan semua bulan, tidak mengikuti filter rentang tanggal di sidebar.")
 
         st.divider()
 
@@ -3759,6 +3707,42 @@ with tab7:
             ),
             use_container_width=True, hide_index=True
         )
+
+        if not df_ekspedisi_raw.empty and "Tanggal_Lengkap" in df_ekspedisi_raw.columns:
+            st.divider()
+            df_eks_plot = df_ekspedisi_raw.copy()
+            df_eks_plot["Bulan_Label"] = df_eks_plot["Tanggal_Lengkap"].dt.to_period("M").astype(str)
+            eks_bulanan = df_eks_plot.groupby("Bulan_Label").agg(
+                Pendapatan=("PENDAPATAN", "sum"), Pengeluaran=("PENGELUARAN", "sum")
+            ).reset_index().sort_values("Bulan_Label")
+            eks_bulanan["Laba"] = eks_bulanan["Pendapatan"] - eks_bulanan["Pengeluaran"]
+
+            fig_eks = go.Figure()
+            fig_eks.add_trace(go.Bar(
+                name="Pendapatan", x=eks_bulanan["Bulan_Label"], y=eks_bulanan["Pendapatan"],
+                marker_color="#1f77b4",
+                text=[rp_short(v) for v in eks_bulanan["Pendapatan"]],
+                textposition="outside", textfont=dict(size=11)
+            ))
+            fig_eks.add_trace(go.Bar(
+                name="Pengeluaran", x=eks_bulanan["Bulan_Label"], y=eks_bulanan["Pengeluaran"],
+                marker_color="#d62728",
+                text=[rp_short(v) for v in eks_bulanan["Pengeluaran"]],
+                textposition="outside", textfont=dict(size=11)
+            ))
+            fig_eks.add_trace(go.Scatter(
+                name="Laba Bersih", x=eks_bulanan["Bulan_Label"], y=eks_bulanan["Laba"],
+                mode="lines+markers", line=dict(color="#ff7f0e", width=2), marker=dict(size=8)
+            ))
+            fig_eks.update_layout(
+                barmode="group",
+                title="Pendapatan vs Pengeluaran Ekspedisi per Bulan (Seluruh Data, Tidak Difilter)",
+                yaxis_title="Rupiah", xaxis_title="Bulan"
+            )
+            fig_eks.update_xaxes(type="category")
+            pad_yaxis(fig_eks, max(eks_bulanan["Pendapatan"].max(), eks_bulanan["Pengeluaran"].max()) if not eks_bulanan.empty else 0)
+            st.plotly_chart(fig_eks, use_container_width=True)
+            st.caption("Grafik ini selalu menampilkan semua bulan, tidak mengikuti filter rentang tanggal di sidebar.")
 
 # TAB 8: KERUGIAN GUDANG
 with tab8:
