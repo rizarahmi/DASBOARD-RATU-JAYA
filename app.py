@@ -682,33 +682,68 @@ def load_saldo_bank() -> dict:
         saldo_bri, saldo_bca = None, None
     return {"bri": saldo_bri, "bca": saldo_bca}
 
+def _fetch_raw_csv_no_dropna(sheet_name: str, spreadsheet_id: str = None) -> pd.DataFrame:
+    # Sama seperti fetch_raw_csv, TAPI TANPA dropna(how="all") -- fetch_raw_csv
+    # membuang baris yang kosong total lalu reset_index, yang MENGGESER index
+    # baris kalau ada baris kosong di tengah. Fatal untuk logic yang mengandalkan
+    # posisi baris persis (mis. "baris 15 sheet = baris TOTAL"). Di sini baris
+    # kosong TIDAK dibuang, hanya baris kosong-total di EKOR (setelah baris data
+    # terakhir) yang dipangkas, supaya index baris di tengah/atas tetap PERSIS
+    # sama dengan nomor baris asli di sheet (baris 2 sheet = index 0, dst).
+    sid = spreadsheet_id or SPREADSHEET_ID
+    encoded = urllib.parse.quote(sheet_name)
+    url = f"https://docs.google.com/spreadsheets/d/{sid}/gviz/tq?tqx=out:csv&sheet={encoded}"
+    try:
+        df = pd.read_csv(url, dtype=str, header=0)
+    except Exception as e:
+        st.warning(f"Gagal membaca sheet '{sheet_name}': {e}")
+        return pd.DataFrame()
+
+    def col_letter(n):
+        result = ""
+        while n >= 0:
+            result = chr(n % 26 + ord("A")) + result
+            n = n // 26 - 1
+        return result
+
+    new_cols = []
+    for i, c in enumerate(df.columns):
+        if str(c).startswith("Unnamed") or str(c).strip() == "" or str(c).lower() in ["nan", "none"]:
+            new_cols.append(f"_col_{col_letter(i)}")
+        else:
+            new_cols.append(str(c).strip())
+    df.columns = new_cols
+
+    non_empty_mask = df.notna().any(axis=1)
+    if non_empty_mask.any():
+        last_idx = non_empty_mask[non_empty_mask].index.max()
+        df = df.iloc[: last_idx + 1]
+    return df
+
 @st.cache_data(ttl=300, show_spinner="Memuat Laba Rugi...")
 def load_laba_rugi() -> pd.DataFrame:
-    # Sheet LABA RUGI dibuat manual oleh user di spreadsheet DATA POKOK. TIDAK
-    # dilewatkan drop_placeholder_cols supaya posisi kolom asli (kolom C = Debit,
-    # kolom D = Kredit) tidak ikut bergeser kalau ada kolom kosong di sebelah kiri.
-    df = fetch_raw_csv(SHEET_LABA_RUGI)
-    return df.reset_index(drop=True) if not df.empty else df
+    # Sheet LABA RUGI dibuat manual oleh user di spreadsheet DATA POKOK. Dibaca
+    # lewat _fetch_raw_csv_no_dropna supaya posisi baris & kolom asli (kolom C =
+    # Debit, kolom D = Kredit, baris 15 = TOTAL) tidak ikut bergeser.
+    return _fetch_raw_csv_no_dropna(SHEET_LABA_RUGI)
 
 @st.cache_data(ttl=300, show_spinner="Memuat Neraca...")
 def load_neraca() -> pd.DataFrame:
     # Sama seperti LABA RUGI -- posisi baris/kolom asli dipertahankan.
-    df = fetch_raw_csv(SHEET_NERACA)
-    return df.reset_index(drop=True) if not df.empty else df
+    return _fetch_raw_csv_no_dropna(SHEET_NERACA)
 
-def _ambil_nilai_baris(df: pd.DataFrame, idx: int):
-    # Ambil nilai numerik dari baris ke-idx (0-based, sudah dikurangi 1 baris
-    # header), dicari dari kolom paling kanan ke kiri karena nilai total biasanya
-    # ada di kolom paling kanan yang terisi.
-    if df is None or df.empty or idx is None or idx < 0 or idx >= len(df):
+def _ambil_nilai_kolom(df: pd.DataFrame, idx_baris: int, idx_kolom: int):
+    # Ambil nilai numerik persis dari sel (idx_baris, idx_kolom) -- 0-based,
+    # sudah dikurangi 1 baris header.
+    if df is None or df.empty or idx_baris is None or idx_baris < 0 or idx_baris >= len(df):
         return None
-    for v in reversed(list(df.iloc[idx])):
-        if v is None:
-            continue
-        num = to_number(pd.Series([v])).iloc[0]
-        if pd.notna(num):
-            return float(num)
-    return None
+    if idx_kolom is None or idx_kolom < 0 or idx_kolom >= df.shape[1]:
+        return None
+    v = df.iloc[idx_baris, idx_kolom]
+    if v is None:
+        return None
+    num = to_number(pd.Series([v])).iloc[0]
+    return float(num) if pd.notna(num) else None
 
 def _render_tabel_keuangan(df: pd.DataFrame, baris_total_idx=None, extra_keywords=None) -> str:
     # Tabel HTML dengan header berwarna (navy) + baris TOTAL di-highlight, dipakai
@@ -4141,8 +4176,8 @@ with tab10:
         else:
             IDX_TOTAL_AKTIVA = 14  # baris 16 di sheet
             IDX_TOTAL_PASIVA = 26  # baris 28 di sheet
-            total_aktiva = _ambil_nilai_baris(df_neraca_raw, IDX_TOTAL_AKTIVA)
-            total_pasiva = _ambil_nilai_baris(df_neraca_raw, IDX_TOTAL_PASIVA)
+            total_aktiva = _ambil_nilai_kolom(df_neraca_raw, IDX_TOTAL_AKTIVA, 2)  # kolom C
+            total_pasiva = _ambil_nilai_kolom(df_neraca_raw, IDX_TOTAL_PASIVA, 3)  # kolom D
 
             if total_aktiva is None or total_pasiva is None:
                 st.warning(
