@@ -139,6 +139,8 @@ SHEET_HUTANG_PAKE_TANI = "HUTANG PAK'E TANI"
 SHEET_STOK_LAPAK      = "STOK LAPAK"
 SHEET_STOK_GUDANG     = "STOK GUDANG"
 SHEET_BARANG_MASUK    = "BARANG_MASUK"
+SHEET_LABA_RUGI       = "LABA RUGI"
+SHEET_NERACA          = "NERACA"
 
 GH_SPREADSHEET_ID  = "17MhBomkR5qaLs0tOu6CO4H1pDTn1BV6_7hxOrvcVWSE"
 SHEET_GH_BAHAN     = "BAHAN"
@@ -679,6 +681,46 @@ def load_saldo_bank() -> dict:
     except Exception:
         saldo_bri, saldo_bca = None, None
     return {"bri": saldo_bri, "bca": saldo_bca}
+
+@st.cache_data(ttl=300, show_spinner="Memuat Laba Rugi...")
+def load_laba_rugi() -> pd.DataFrame:
+    # Sheet LABA RUGI dibuat manual oleh user di spreadsheet DATA POKOK -- dibaca
+    # apa adanya (drop_placeholder_cols buang kolom yang beneran kosong), supaya
+    # baris/kolom yang ada tetap terbaca meskipun struktur persisnya bisa berubah.
+    df = fetch_raw_csv(SHEET_LABA_RUGI)
+    if df.empty:
+        return df
+    df = drop_placeholder_cols(df)
+    return df.reset_index(drop=True)
+
+@st.cache_data(ttl=300, show_spinner="Memuat Neraca...")
+def load_neraca() -> pd.DataFrame:
+    # Sheet NERACA dibuat manual oleh user di spreadsheet DATA POKOK -- dibaca apa
+    # adanya, sama seperti LABA RUGI.
+    df = fetch_raw_csv(SHEET_NERACA)
+    if df.empty:
+        return df
+    df = drop_placeholder_cols(df)
+    return df.reset_index(drop=True)
+
+def _cari_baris_total(df: pd.DataFrame, label_dicari: str):
+    # Cari baris yang salah satu selnya (setelah di-strip & uppercase) PERSIS sama
+    # dengan label_dicari (mis. "TOTAL AKTIVA"), lalu ambil nilai numerik pertama
+    # yang ditemukan di baris yang sama (dari kanan ke kiri, karena biasanya nilai
+    # totalnya ada di kolom paling kanan yang terisi). Return None kalau tidak ada.
+    target = label_dicari.strip().upper()
+    for _, row in df.iterrows():
+        vals = list(row)
+        cocok = any(str(v).strip().upper() == target for v in vals if v is not None and str(v).strip() != "")
+        if not cocok:
+            continue
+        for v in reversed(vals):
+            if v is None:
+                continue
+            num = to_number(pd.Series([v])).iloc[0]
+            if pd.notna(num) and str(v).strip().upper() != target:
+                return float(num)
+    return None
 
 @st.cache_data(ttl=300, show_spinner="Memuat Pengeluaran Lapak...")
 def load_pengeluaran_lapak() -> pd.DataFrame:
@@ -1458,6 +1500,13 @@ except Exception as e:
     st.stop()
 
 try:
+    df_laba_rugi_raw = load_laba_rugi()
+    df_neraca_raw    = load_neraca()
+except Exception:
+    df_laba_rugi_raw = pd.DataFrame()
+    df_neraca_raw    = pd.DataFrame()
+
+try:
     saldo_bank_raw = load_saldo_bank()
 except Exception:
     saldo_bank_raw = {"bri": None, "bca": None}
@@ -1648,10 +1697,11 @@ st.caption(f"Update Terakhir: {datetime.now().strftime('%d %B %Y, %H:%M')}")
 st.divider()
 
 # TABS
-tab1, tab2, tab2b, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11 = st.tabs([
+tab1, tab2, tab2b, tab10, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab11 = st.tabs([
     "💰 Pendapatan",
     "🏪 Analisa Lapak",
     "🏬 Analisa Lapak Luar",
+    "💼 Keuangan",
     "🌱 Tanaman",
     "🧾 Piutang",
     "👨‍🌾 Hutang",
@@ -1659,7 +1709,6 @@ tab1, tab2, tab2b, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11 = st.t
     "🚛 Ekspedisi",
     "🏭 Kerugian Gudang",
     "🔮 Prediksi Harga",
-    "🧮 Net Income",
     "🌿 Green House",
 ])
 
@@ -4021,151 +4070,74 @@ with tab9:
             except Exception as e:
                 st.error(f"Terjadi kesalahan saat memproses data prediksi: {str(e)}")
 
-# TAB 10: NET INCOME
+# TAB 10: KEUANGAN (LABA RUGI & NERACA)
 with tab10:
-    st.markdown("### 🧮 Net Income (Laba Bersih)")
+    st.markdown("### 💼 Keuangan")
 
-    URUTAN_PENCOCOKAN = [
-        ("Angsuran Mobil", ["ANGSURAN MOBIL", "CICILAN MOBIL"]),
-        ("Gaji Kantor",    ["GAJI KANTOR"]),
-        ("Barang Kantor",  ["BARANG KANTOR", "PERLENGKAPAN KANTOR", "ATK"]),
-        ("Beban",          ["BEBAN"]),
-        ("Kantor",         ["KANTOR"]),
-    ]
-    URUTAN_TAMPIL = ["Kantor", "Beban", "Angsuran Mobil", "Gaji Kantor", "Barang Kantor"]
+    keuangan_tab1, keuangan_tab2 = st.tabs(["📉 Laba Rugi", "⚖️ Neraca"])
 
-    ada_kas = (not df_kas_raw.empty) and ("JENIS" in df_kas_raw.columns) and ("KAS KELUAR" in df_kas_raw.columns)
+    with keuangan_tab1:
+        if df_laba_rugi_raw.empty:
+            st.info("Sheet 'LABA RUGI' belum ditemukan atau masih kosong di spreadsheet DATA POKOK.")
+        else:
+            col_debit_lr  = next((c for c in df_laba_rugi_raw.columns if c.strip().upper() == "DEBIT"), None)
+            col_kredit_lr = next((c for c in df_laba_rugi_raw.columns if c.strip().upper() == "KREDIT"), None)
 
-    if ada_kas:
-        semua_jenis = sorted(df_kas_raw["JENIS"].dropna().unique().tolist())
-        pemetaan_otomatis = {}
-        for nama, keywords in URUTAN_PENCOCOKAN:
-            for jv in semua_jenis:
-                if jv in pemetaan_otomatis:
-                    continue
-                if any(kw in jv for kw in keywords):
-                    pemetaan_otomatis[jv] = nama
-        deteksi_otomatis = {nama: [jv for jv, n in pemetaan_otomatis.items() if n == nama] for nama in URUTAN_TAMPIL}
-    else:
-        semua_jenis = []
-        deteksi_otomatis = {nama: [] for nama in URUTAN_TAMPIL}
+            if not col_debit_lr or not col_kredit_lr:
+                st.warning(
+                    "Kolom 'DEBIT' dan/atau 'KREDIT' tidak ditemukan di sheet LABA RUGI, jadi Net Income "
+                    "belum bisa dihitung otomatis. Kolom yang terbaca: "
+                    + ", ".join(str(c) for c in df_laba_rugi_raw.columns)
+                )
+            else:
+                total_debit_lr  = to_number(df_laba_rugi_raw[col_debit_lr]).sum()
+                total_kredit_lr = to_number(df_laba_rugi_raw[col_kredit_lr]).sum()
+                net_income_lr = total_debit_lr - total_kredit_lr
+                kelas_ni_lr = "hero-green" if net_income_lr >= 0 else "hero-red"
+                st.markdown(
+                    '<div class="hero-row">'
+                    + hero_card("📋 Total Debit", rp(total_debit_lr), "hero-blue")
+                    + hero_card("📋 Total Kredit", rp(total_kredit_lr), "hero-orange")
+                    + hero_card("🧮 Net Income", rp(net_income_lr), kelas_ni_lr)
+                    + '</div>',
+                    unsafe_allow_html=True
+                )
+                st.caption("Net Income = Total Debit − Total Kredit (dari sheet LABA RUGI, spreadsheet DATA POKOK).")
+                st.write("")
 
-    pilihan_kategori = deteksi_otomatis
+            st.dataframe(format_money_table(df_laba_rugi_raw), use_container_width=True, hide_index=True)
 
-    if not df_kas.empty and "JENIS" in df_kas.columns and "KAS KELUAR" in df_kas.columns:
-        pengeluaran_per_kategori = {
-            nama: (df_kas[df_kas["JENIS"].isin(pilihan_kategori[nama])]["KAS KELUAR"].sum() if pilihan_kategori[nama] else 0.0)
-            for nama in URUTAN_TAMPIL
-        }
-        jenis_terpilih_semua = [jv for nama in URUTAN_TAMPIL for jv in pilihan_kategori[nama]]
-        df_kas_deduksi = df_kas[df_kas["JENIS"].isin(jenis_terpilih_semua)].copy() if jenis_terpilih_semua else df_kas.iloc[0:0].copy()
-    else:
-        pengeluaran_per_kategori = {nama: 0.0 for nama in URUTAN_TAMPIL}
-        df_kas_deduksi = pd.DataFrame()
+    with keuangan_tab2:
+        if df_neraca_raw.empty:
+            st.info("Sheet 'NERACA' belum ditemukan atau masih kosong di spreadsheet DATA POKOK.")
+        else:
+            total_aktiva = _cari_baris_total(df_neraca_raw, "TOTAL AKTIVA")
+            total_pasiva = _cari_baris_total(df_neraca_raw, "TOTAL PASIVA")
 
-    total_pengeluaran_kategori = sum(pengeluaran_per_kategori.values())
-    laba_bersih = total_laba - total_pengeluaran_kategori
-    margin_bersih = (laba_bersih / total_omzet * 100) if total_omzet > 0 else None
+            if total_aktiva is None or total_pasiva is None:
+                bagian_belum_ketemu = []
+                if total_aktiva is None:
+                    bagian_belum_ketemu.append("'TOTAL AKTIVA'")
+                if total_pasiva is None:
+                    bagian_belum_ketemu.append("'TOTAL PASIVA'")
+                st.warning(
+                    f"Baris {' dan '.join(bagian_belum_ketemu)} tidak ditemukan di sheet NERACA, jadi status "
+                    "balancing belum bisa dihitung otomatis. Pastikan ada baris dengan label persis 'TOTAL "
+                    "AKTIVA' dan 'TOTAL PASIVA' beserta nilainya di sheet tersebut."
+                )
+            else:
+                selisih_neraca = total_aktiva - total_pasiva
+                if abs(selisih_neraca) < 1:
+                    st.success(f"✅ **BALANCING** — Total Aktiva ({rp(total_aktiva)}) = Total Pasiva ({rp(total_pasiva)})")
+                else:
+                    arah_selisih = "Total Aktiva lebih besar dari Total Pasiva" if selisih_neraca > 0 else "Total Pasiva lebih besar dari Total Aktiva"
+                    st.error(f"⚠️ **TIDAK BALANCING** — Selisih: {rp(abs(selisih_neraca))} ({arah_selisih})")
+                c1, c2 = st.columns(2)
+                c1.metric("Total Aktiva", rp(total_aktiva))
+                c2.metric("Total Pasiva", rp(total_pasiva))
+                st.write("")
 
-    kelas_hero_net = "hero-green" if laba_bersih >= 0 else "hero-red"
-    st.markdown(
-        '<div class="hero-row">'
-        + hero_card("📈 Total Laba", rp(total_laba), "hero-blue")
-        + hero_card("💸 Total Deduksi Arus Kas", rp(total_pengeluaran_kategori), "hero-orange")
-        + hero_card("🧮 Net Income", rp(laba_bersih), kelas_hero_net)
-        + '</div>',
-        unsafe_allow_html=True
-    )
-    if margin_bersih is not None:
-        st.caption(f"📐 Net Margin (Net Income ÷ Total Omzet): **{margin_bersih:.1f}%**")
-
-    if laba_bersih >= 0:
-        st.success(f"✅ Net Income periode ini **positif**: {rp(laba_bersih)}. Total laba masih mampu menutup seluruh pengeluaran kategori kantor.")
-    else:
-        st.error(f"⚠️ Net Income periode ini **negatif**: {rp(laba_bersih)}. Pengeluaran kategori kantor melebihi total laba yang dihasilkan pada periode ini.")
-
-    if total_pengeluaran_kategori > 0:
-        kategori_terbesar = max(pengeluaran_per_kategori, key=pengeluaran_per_kategori.get)
-        pct_terbesar = pengeluaran_per_kategori[kategori_terbesar] / total_pengeluaran_kategori * 100
-        st.caption(f"💡 Kategori deduksi terbesar: **{kategori_terbesar}** — {rp(pengeluaran_per_kategori[kategori_terbesar])} ({pct_terbesar:.0f}% dari total deduksi).")
-
-    st.write("")
-    st.divider()
-
-    section_heading("🌊 Alur Perhitungan: Total Laba → Net Income")
-
-    labels_wf   = ["Total Laba"] + URUTAN_TAMPIL + ["Net Income"]
-    measures_wf = ["absolute"] + ["relative"] * len(URUTAN_TAMPIL) + ["total"]
-    values_wf   = [total_laba] + [-pengeluaran_per_kategori[n] for n in URUTAN_TAMPIL] + [0]
-    text_wf     = [rp_short(total_laba)] + [f"-{rp_short(pengeluaran_per_kategori[n])}" for n in URUTAN_TAMPIL] + [rp_short(laba_bersih)]
-
-    fig_wf = go.Figure(go.Waterfall(
-        orientation="v",
-        measure=measures_wf,
-        x=labels_wf,
-        y=values_wf,
-        text=text_wf,
-        textposition="outside",
-        textfont=dict(size=13),
-        connector=dict(line=dict(color="#b0b8c7", width=1.2)),
-        increasing=dict(marker=dict(color="#2ca02c")),
-        decreasing=dict(marker=dict(color="#d62728")),
-        totals=dict(marker=dict(color="#1f3864")),
-    ))
-
-    running = total_laba
-    running_series = [running]
-    for n in URUTAN_TAMPIL:
-        running = running - pengeluaran_per_kategori[n]
-        running_series.append(running)
-    wf_low  = min(0, min(running_series))
-    wf_high = max(max(running_series), total_laba)
-    wf_span = max(wf_high - wf_low, 1)
-    fig_wf.update_yaxes(range=[wf_low - wf_span * 0.15, wf_high + wf_span * 0.2])
-    fig_wf.update_traces(cliponaxis=False)
-    fig_wf.update_layout(
-        title="Bridge Chart Net Income",
-        yaxis_title="Rupiah", showlegend=False, height=480,
-        yaxis_tickformat=","
-    )
-    st_plotly(fig_wf, use_container_width=True)
-
-    st.divider()
-
-    section_heading("📊 Rincian Pengeluaran per Kategori")
-    tabel_kat = pd.DataFrame({
-        "Kategori": URUTAN_TAMPIL,
-        "Jumlah JENIS Terpilih": [len(pilihan_kategori[n]) for n in URUTAN_TAMPIL],
-        "Total Pengeluaran": [rp(pengeluaran_per_kategori[n]) for n in URUTAN_TAMPIL],
-    })
-    st.dataframe(tabel_kat, use_container_width=True, hide_index=True)
-
-    st.divider()
-
-    jenis_ke_kategori = {jv: nama for nama in URUTAN_TAMPIL for jv in pilihan_kategori[nama]}
-
-    section_heading("📄 Detail Transaksi Arus Kas (Kategori Terpilih)")
-    if df_kas_deduksi.empty:
-        st.info("Tidak ada transaksi arus kas yang cocok dengan kategori terpilih pada periode ini.")
-    else:
-        df_detail = df_kas_deduksi.copy()
-        df_detail["Kategori Net Income"] = df_detail["JENIS"].map(jenis_ke_kategori)
-        csv_detail = df_detail.drop(columns=["Tanggal_Kas"], errors="ignore").copy()
-
-        st.markdown(f"**Total Transaksi: {len(df_detail)} baris**")
-        cols_show = [c for c in df_detail.columns if c != "Tanggal_Kas"]
-        st.dataframe(
-            format_money_table(df_detail[cols_show], extra_keywords=["KAS", "SALDO", "MASUK", "KELUAR"]),
-            use_container_width=True, hide_index=True
-        )
-
-        st.download_button(
-            "⬇️ Unduh Detail Transaksi (CSV)",
-            data=csv_detail.to_csv(index=False).encode("utf-8"),
-            file_name="detail_deduksi_net_income.csv",
-            mime="text/csv",
-            key="net_income_download"
-        )
+            st.dataframe(format_money_table(df_neraca_raw), use_container_width=True, hide_index=True)
 
 # TAB 11: GREEN HOUSE
 with tab11:
