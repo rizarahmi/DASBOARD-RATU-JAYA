@@ -684,43 +684,68 @@ def load_saldo_bank() -> dict:
 
 @st.cache_data(ttl=300, show_spinner="Memuat Laba Rugi...")
 def load_laba_rugi() -> pd.DataFrame:
-    # Sheet LABA RUGI dibuat manual oleh user di spreadsheet DATA POKOK -- dibaca
-    # apa adanya (drop_placeholder_cols buang kolom yang beneran kosong), supaya
-    # baris/kolom yang ada tetap terbaca meskipun struktur persisnya bisa berubah.
+    # Sheet LABA RUGI dibuat manual oleh user di spreadsheet DATA POKOK. TIDAK
+    # dilewatkan drop_placeholder_cols supaya posisi kolom asli (kolom C = Debit,
+    # kolom D = Kredit) tidak ikut bergeser kalau ada kolom kosong di sebelah kiri.
     df = fetch_raw_csv(SHEET_LABA_RUGI)
-    if df.empty:
-        return df
-    df = drop_placeholder_cols(df)
-    return df.reset_index(drop=True)
+    return df.reset_index(drop=True) if not df.empty else df
 
 @st.cache_data(ttl=300, show_spinner="Memuat Neraca...")
 def load_neraca() -> pd.DataFrame:
-    # Sheet NERACA dibuat manual oleh user di spreadsheet DATA POKOK -- dibaca apa
-    # adanya, sama seperti LABA RUGI.
+    # Sama seperti LABA RUGI -- posisi baris/kolom asli dipertahankan.
     df = fetch_raw_csv(SHEET_NERACA)
-    if df.empty:
-        return df
-    df = drop_placeholder_cols(df)
-    return df.reset_index(drop=True)
+    return df.reset_index(drop=True) if not df.empty else df
 
-def _cari_baris_total(df: pd.DataFrame, label_dicari: str):
-    # Cari baris yang salah satu selnya (setelah di-strip & uppercase) PERSIS sama
-    # dengan label_dicari (mis. "TOTAL AKTIVA"), lalu ambil nilai numerik pertama
-    # yang ditemukan di baris yang sama (dari kanan ke kiri, karena biasanya nilai
-    # totalnya ada di kolom paling kanan yang terisi). Return None kalau tidak ada.
-    target = label_dicari.strip().upper()
-    for _, row in df.iterrows():
-        vals = list(row)
-        cocok = any(str(v).strip().upper() == target for v in vals if v is not None and str(v).strip() != "")
-        if not cocok:
+def _ambil_nilai_baris(df: pd.DataFrame, idx: int):
+    # Ambil nilai numerik dari baris ke-idx (0-based, sudah dikurangi 1 baris
+    # header), dicari dari kolom paling kanan ke kiri karena nilai total biasanya
+    # ada di kolom paling kanan yang terisi.
+    if df is None or df.empty or idx is None or idx < 0 or idx >= len(df):
+        return None
+    for v in reversed(list(df.iloc[idx])):
+        if v is None:
             continue
-        for v in reversed(vals):
-            if v is None:
-                continue
-            num = to_number(pd.Series([v])).iloc[0]
-            if pd.notna(num) and str(v).strip().upper() != target:
-                return float(num)
+        num = to_number(pd.Series([v])).iloc[0]
+        if pd.notna(num):
+            return float(num)
     return None
+
+def _render_tabel_keuangan(df: pd.DataFrame, baris_total_idx=None, extra_keywords=None) -> str:
+    # Tabel HTML dengan header berwarna (navy) + baris TOTAL di-highlight, dipakai
+    # bareng untuk tabel LABA RUGI dan NERACA di tab Keuangan.
+    baris_total_idx = baris_total_idx or set()
+    df_fmt = format_money_table(df, extra_keywords=extra_keywords)
+
+    def _esc(x):
+        s = "" if x is None else str(x)
+        return (s.replace("&", "&amp;").replace("<", "&lt;")
+                 .replace(">", "&gt;").replace('"', "&quot;"))
+
+    cols_tampil = [c for c in df_fmt.columns if not str(c).startswith("_col_")]
+    header_html = "".join(f"<th>{_esc(c)}</th>" for c in cols_tampil)
+
+    body_rows = []
+    for i in range(len(df_fmt)):
+        row = df_fmt.iloc[i]
+        row_asli = df.iloc[i]
+        cls = ' class="keu-total-row"' if i in baris_total_idx else ""
+        cells = "".join(
+            f"<td>{_esc(row[c])}</td>" if pd.notna(row_asli[c]) and str(row_asli[c]).strip() not in ("", "-") else "<td></td>"
+            for c in cols_tampil
+        )
+        body_rows.append(f"<tr{cls}>{cells}</tr>")
+
+    return f"""<style>
+.keu-wrap {{ max-height: 600px; overflow: auto; border: 1px solid #e0e6f0; border-radius: 8px; }}
+.keu-table {{ width: 100%; border-collapse: collapse; font-size: 13.5px; }}
+.keu-table th {{ position: sticky; top: 0; background: #1f3864; color: #fff; padding: 9px 10px; text-align: left; white-space: nowrap; z-index: 1; }}
+.keu-table td {{ padding: 8px 10px; border-bottom: 1px solid #eef1f6; white-space: nowrap; }}
+.keu-table tr.keu-total-row td {{ background: #d6e4f0; font-weight: 800; color: #1f3864; border-top: 2px solid #1f3864; border-bottom: 2px solid #1f3864; }}
+</style>
+<div class="keu-wrap"><table class="keu-table">
+<thead><tr>{header_html}</tr></thead>
+<tbody>{"".join(body_rows)}</tbody>
+</table></div>"""
 
 @st.cache_data(ttl=300, show_spinner="Memuat Pengeluaran Lapak...")
 def load_pengeluaran_lapak() -> pd.DataFrame:
@@ -4080,18 +4105,20 @@ with tab10:
         if df_laba_rugi_raw.empty:
             st.info("Sheet 'LABA RUGI' belum ditemukan atau masih kosong di spreadsheet DATA POKOK.")
         else:
-            col_debit_lr  = next((c for c in df_laba_rugi_raw.columns if c.strip().upper() == "DEBIT"), None)
-            col_kredit_lr = next((c for c in df_laba_rugi_raw.columns if c.strip().upper() == "KREDIT"), None)
+            lr_cols = list(df_laba_rugi_raw.columns)
+            col_debit_lr  = lr_cols[2] if len(lr_cols) > 2 else None  # Kolom C
+            col_kredit_lr = lr_cols[3] if len(lr_cols) > 3 else None  # Kolom D
+            IDX_TOTAL_LR = 13  # baris 15 di sheet (baris 2 sheet = index 0)
 
             if not col_debit_lr or not col_kredit_lr:
-                st.warning(
-                    "Kolom 'DEBIT' dan/atau 'KREDIT' tidak ditemukan di sheet LABA RUGI, jadi Net Income "
-                    "belum bisa dihitung otomatis. Kolom yang terbaca: "
-                    + ", ".join(str(c) for c in df_laba_rugi_raw.columns)
-                )
+                st.warning("Sheet LABA RUGI belum punya kolom C (Debit) dan/atau D (Kredit).")
             else:
-                total_debit_lr  = to_number(df_laba_rugi_raw[col_debit_lr]).sum()
-                total_kredit_lr = to_number(df_laba_rugi_raw[col_kredit_lr]).sum()
+                # Baris detail = baris 2-14 sheet (index 0-12). Baris 15 (index 13)
+                # adalah baris TOTAL yang sudah dihitung sendiri di sheet, jadi tidak
+                # ikut dijumlah lagi di sini supaya tidak dobel hitung.
+                df_lr_detail = df_laba_rugi_raw.iloc[0:IDX_TOTAL_LR]
+                total_debit_lr  = to_number(df_lr_detail[col_debit_lr]).sum()
+                total_kredit_lr = to_number(df_lr_detail[col_kredit_lr]).sum()
                 net_income_lr = total_debit_lr - total_kredit_lr
                 kelas_ni_lr = "hero-green" if net_income_lr >= 0 else "hero-red"
                 st.markdown(
@@ -4102,28 +4129,25 @@ with tab10:
                     + '</div>',
                     unsafe_allow_html=True
                 )
-                st.caption("Net Income = Total Debit − Total Kredit (dari sheet LABA RUGI, spreadsheet DATA POKOK).")
+                st.caption("Net Income = Total Debit − Total Kredit (kolom C & D, baris 2–14 sheet LABA RUGI).")
                 st.write("")
 
-            st.dataframe(format_money_table(df_laba_rugi_raw), use_container_width=True, hide_index=True)
+            html_lr = _render_tabel_keuangan(df_laba_rugi_raw, baris_total_idx={IDX_TOTAL_LR}, extra_keywords=["DEBIT", "KREDIT"])
+            st.markdown(html_lr, unsafe_allow_html=True)
 
     with keuangan_tab2:
         if df_neraca_raw.empty:
             st.info("Sheet 'NERACA' belum ditemukan atau masih kosong di spreadsheet DATA POKOK.")
         else:
-            total_aktiva = _cari_baris_total(df_neraca_raw, "TOTAL AKTIVA")
-            total_pasiva = _cari_baris_total(df_neraca_raw, "TOTAL PASIVA")
+            IDX_TOTAL_AKTIVA = 14  # baris 16 di sheet
+            IDX_TOTAL_PASIVA = 26  # baris 28 di sheet
+            total_aktiva = _ambil_nilai_baris(df_neraca_raw, IDX_TOTAL_AKTIVA)
+            total_pasiva = _ambil_nilai_baris(df_neraca_raw, IDX_TOTAL_PASIVA)
 
             if total_aktiva is None or total_pasiva is None:
-                bagian_belum_ketemu = []
-                if total_aktiva is None:
-                    bagian_belum_ketemu.append("'TOTAL AKTIVA'")
-                if total_pasiva is None:
-                    bagian_belum_ketemu.append("'TOTAL PASIVA'")
                 st.warning(
-                    f"Baris {' dan '.join(bagian_belum_ketemu)} tidak ditemukan di sheet NERACA, jadi status "
-                    "balancing belum bisa dihitung otomatis. Pastikan ada baris dengan label persis 'TOTAL "
-                    "AKTIVA' dan 'TOTAL PASIVA' beserta nilainya di sheet tersebut."
+                    "Nilai Total Aktiva (baris 16) dan/atau Total Pasiva (baris 28) belum ketemu di sheet "
+                    "NERACA. Cek lagi apakah barisnya masih di posisi yang sama."
                 )
             else:
                 selisih_neraca = total_aktiva - total_pasiva
@@ -4137,7 +4161,8 @@ with tab10:
                 c2.metric("Total Pasiva", rp(total_pasiva))
                 st.write("")
 
-            st.dataframe(format_money_table(df_neraca_raw), use_container_width=True, hide_index=True)
+            html_neraca = _render_tabel_keuangan(df_neraca_raw, baris_total_idx={IDX_TOTAL_AKTIVA, IDX_TOTAL_PASIVA}, extra_keywords=["AKTIVA", "PASIVA", "NILAI"])
+            st.markdown(html_neraca, unsafe_allow_html=True)
 
 # TAB 11: GREEN HOUSE
 with tab11:
