@@ -4176,8 +4176,21 @@ with tab10:
         else:
             IDX_TOTAL_AKTIVA = 14  # baris 16 di sheet
             IDX_TOTAL_PASIVA = 26  # baris 28 di sheet
-            total_aktiva = _ambil_nilai_kolom(df_neraca_raw, IDX_TOTAL_AKTIVA, 2)  # kolom C
-            total_pasiva = _ambil_nilai_kolom(df_neraca_raw, IDX_TOTAL_PASIVA, 3)  # kolom D
+            neraca_cols = list(df_neraca_raw.columns)
+            col_aktiva_neraca = neraca_cols[2] if len(neraca_cols) > 2 else None  # kolom C
+            col_pasiva_neraca = neraca_cols[3] if len(neraca_cols) > 3 else None  # kolom D
+
+            # Total Aktiva = SUM seluruh kolom C, Total Pasiva = SUM seluruh kolom D
+            # -- baris TOTAL itu sendiri (16 & 28) dikeluarkan dari penjumlahan
+            # supaya tidak dobel hitung, sama seperti logic LABA RUGI.
+            if col_aktiva_neraca is not None:
+                total_aktiva = to_number(df_neraca_raw[col_aktiva_neraca].drop(index=IDX_TOTAL_AKTIVA, errors="ignore")).sum()
+            else:
+                total_aktiva = None
+            if col_pasiva_neraca is not None:
+                total_pasiva = to_number(df_neraca_raw[col_pasiva_neraca].drop(index=IDX_TOTAL_PASIVA, errors="ignore")).sum()
+            else:
+                total_pasiva = None
 
             if total_aktiva is None or total_pasiva is None:
                 st.warning(
