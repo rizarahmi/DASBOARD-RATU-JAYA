@@ -658,7 +658,7 @@ def load_arus_kas() -> pd.DataFrame:
     for col in ["KAS MASUK", "KAS KELUAR", "SALDO"]:
         if col in df.columns:
             df[col] = to_number(df[col])
-    df["Tanggal_Kas"] = pd.to_datetime(df["TANGGAL"], errors="coerce") if "TANGGAL" in df.columns else pd.NaT
+    df["Tanggal_Kas"] = pd.to_datetime(df["TANGGAL"], dayfirst=True, errors="coerce") if "TANGGAL" in df.columns else pd.NaT
     if "JENIS" in df.columns:
         df["JENIS"] = df["JENIS"].astype(str).str.strip().str.upper()
     return df
@@ -784,18 +784,35 @@ def _render_tabel_keuangan(df: pd.DataFrame, baris_total_idx=None, extra_keyword
 
 @st.cache_data(ttl=300, show_spinner="Memuat Pengeluaran Lapak...")
 def load_pengeluaran_lapak() -> pd.DataFrame:
-    df = fetch_clean_csv(SHEET_PENGELUARAN)
+    # Pakai fetch_raw_csv (bukan fetch_clean_csv) supaya kolom tanpa header tetap
+    # kebaca -- di sheet PENGELUARAN LAPAK, kolom D tidak punya judul tapi berisi
+    # keterangan untuk baris JENIS PENGELUARAN = HPP (mis. "KARUNG / PLASTIK"),
+    # sementara kolom C "KETERANGAN" isinya untuk baris OVERHEAD. Keduanya saling
+    # eksklusif (tidak pernah terisi bersamaan), jadi digabung jadi satu kolom
+    # KETERANGAN supaya tidak ada data yang hilang.
+    df = fetch_raw_csv(SHEET_PENGELUARAN)
     if df.empty:
         return df
     col_map = {c: c.strip() for c in df.columns}
     df.rename(columns=col_map, inplace=True)
+
+    ket_col = next((c for c in df.columns if c.strip().upper() == "KETERANGAN"), None)
+    col_d_noheader = next((c for c in df.columns if str(c) == "_col_D"), None)
+    if ket_col and col_d_noheader:
+        df[ket_col] = df[ket_col].where(df[ket_col].apply(is_filled), df[col_d_noheader])
+        df = df.drop(columns=[col_d_noheader])
+    elif col_d_noheader:
+        df = df.rename(columns={col_d_noheader: "KETERANGAN"})
+
+    df = drop_placeholder_cols(df)
+
     nominal_col = next((c for c in df.columns if c.strip().upper() == "NOMINAL"), None)
     if nominal_col:
         df[nominal_col] = to_number(df[nominal_col])
     if nominal_col and nominal_col != "NOMINAL":
         df.rename(columns={nominal_col: "NOMINAL"}, inplace=True)
     tgl_col = next((c for c in df.columns if c.strip().upper() in ["TANGGAL", "TGL", "DATE"]), None)
-    df["Tanggal_Lengkap"] = pd.to_datetime(df[tgl_col], errors="coerce") if tgl_col else pd.NaT
+    df["Tanggal_Lengkap"] = pd.to_datetime(df[tgl_col], dayfirst=True, errors="coerce") if tgl_col else pd.NaT
     lokasi_col = next((c for c in df.columns if "lokasi" in c.strip().lower() and "lapak" in c.strip().lower()), None)
     if lokasi_col:
         if lokasi_col != "LOKASI LAPAK":
