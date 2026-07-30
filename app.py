@@ -3473,7 +3473,7 @@ with tab4:
                     .sort_values("Sisa_Hutang", ascending=False)
                 )
 
-                per_nama = per_nama[per_nama["Sisa_Hutang"].fillna(0) > 0].reset_index(drop=True)
+                per_nama = per_nama[per_nama["Sisa_Hutang"].fillna(0) != 0].reset_index(drop=True)
 
                 fig_per_nama = go.Figure()
                 fig_per_nama.add_trace(go.Bar(
