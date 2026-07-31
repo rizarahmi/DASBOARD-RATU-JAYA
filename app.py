@@ -127,7 +127,7 @@ PENJUALAN_LAPAK_SPREADSHEET_ID = "1p0swTGBCLA0XjNOU-bXYu1a4ECc4R2DKW1VvX7y4fWA"
 SHEET_ARUS_KAS        = "ARUS KAS"
 SHEET_PENGELUARAN     = "PENGELUARAN LAPAK"
 SHEET_PENJUALAN       = "PENJUALAN"
-SHEET_PENJUALAN_LUAR  = "PENJUALAN LAPAK LUAR"
+SHEET_PENJUALAN_LUAR  = "LAPAK LUAR"
 SHEET_PIUTANG         = "PIUTANG LAPAK"
 SHEET_PIUTANG_LUAR    = "PIUTANG LAPAK LUAR"
 SHEET_HUTANG_PETANI   = "HUTANG PETANI"
@@ -525,7 +525,7 @@ def load_penjualan_lapak() -> pd.DataFrame:
 
 @st.cache_data(ttl=300, show_spinner="Memuat Penjualan Lapak Luar...")
 def load_penjualan_lapak_luar() -> pd.DataFrame:
-    df = fetch_raw_csv(SHEET_PENJUALAN_LUAR)
+    df = fetch_raw_csv(SHEET_PENJUALAN_LUAR, spreadsheet_id=PENJUALAN_LAPAK_SPREADSHEET_ID)
     if df.empty:
         return df
 
