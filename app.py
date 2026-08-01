@@ -1990,6 +1990,12 @@ with tab2:
                     (df_stok_lapak_invoice_raw["INVOICE"].astype(str) == sel_invoice_rpi)
                     & df_stok_lapak_invoice_raw["TUJUAN"].apply(is_filled)
                 ].reset_index(drop=True)
+                if gudang_invoice_rpi:
+                    # Kalau nama Lapak tujuan Moving SAMA PERSIS dengan nama Gudang
+                    # invoice ini, jangan ikut ditampilkan di tabel PINK -- datanya
+                    # itu sudah tercermin di tabel HIJAU (Data Gudang), jadi kalau
+                    # dua-duanya ditampilkan jadi dobel hitung.
+                    df_pink_rpi = df_pink_rpi[df_pink_rpi["TUJUAN"] != gudang_invoice_rpi].reset_index(drop=True)
 
             if not df_pink_rpi.empty:
                 jkg_p = to_number(df_pink_rpi["JUMLAH MOVING"]).fillna(0) if "JUMLAH MOVING" in df_pink_rpi.columns else pd.Series([0.0] * len(df_pink_rpi))
