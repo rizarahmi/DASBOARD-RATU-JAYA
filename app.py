@@ -1648,7 +1648,16 @@ if not valid_dates.empty:
     default_end   = min(max_d, akhir_bulan)
 
     if default_start > default_end:
-        default_start, default_end = min_d, max_d
+        # Bulan berjalan belum ada datanya sama sekali (mis. baru masuk tanggal 1
+        # bulan baru) -- default ke BULAN TERAKHIR yang datanya ada (dari max_d),
+        # BUKAN ke seluruh rentang data. Kalau tidak, begitu bulan baru mulai tanpa
+        # ada transaksi sama sekali, dashboard tiba-tiba menampilkan data dari
+        # berbulan-bulan lalu (seluruh histori) alih-alih hanya bulan terakhir yang
+        # relevan.
+        awal_bulan_terakhir  = max_d.replace(day=1)
+        akhir_bulan_terakhir = (pd.Timestamp(max_d) + pd.offsets.MonthEnd(0)).date()
+        default_start = max(min_d, awal_bulan_terakhir)
+        default_end   = min(max_d, akhir_bulan_terakhir)
 
     date_range = st.sidebar.date_input(
         "Rentang Tanggal",
@@ -1774,7 +1783,7 @@ st.caption(f"Update Terakhir: {datetime.now().strftime('%d %B %Y, %H:%M')}")
 st.divider()
 
 # TABS
-tab1, tab2, tab2b, tab10, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab11 = st.tabs([
+tab1, tab2, tab2b, tab10, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab11, tab12 = st.tabs([
     "💰 Pendapatan",
     "🏪 Analisa Lapak",
     "🏬 Analisa Lapak Luar",
@@ -1787,6 +1796,7 @@ tab1, tab2, tab2b, tab10, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab11 = st.t
     "🏭 Kerugian Gudang",
     "🔮 Prediksi Harga",
     "🌿 Green House",
+    "📅 Laporan Bulanan",
 ])
 
 # TAB 1: PENDAPATAN
@@ -3645,7 +3655,10 @@ with tab6:
     else:
         masuk_kas  = df_kas["KAS MASUK"].sum()  if "KAS MASUK"  in df_kas.columns else 0
         keluar_kas = df_kas["KAS KELUAR"].sum() if "KAS KELUAR" in df_kas.columns else 0
-        saldo_kas  = df_kas["SALDO"].dropna().iloc[-1] if "SALDO" in df_kas.columns and not df_kas["SALDO"].dropna().empty else 0
+        # Saldo Terakhir TIDAK ikut filter tanggal sidebar -- ini saldo kas
+        # sebenarnya saat ini, jadi selalu diambil dari data mentah (df_kas_raw),
+        # bukan dari df_kas yang sudah dipotong sesuai rentang tanggal terpilih.
+        saldo_kas  = df_kas_raw["SALDO"].dropna().iloc[-1] if not df_kas_raw.empty and "SALDO" in df_kas_raw.columns and not df_kas_raw["SALDO"].dropna().empty else 0
 
         col_saldo, col_bank = st.columns([1, 2])
         with col_saldo:
@@ -4396,3 +4409,147 @@ with tab11:
             format_money_table(df_gh_kas_raw.drop(columns=["Tanggal_Lengkap"], errors="ignore"), extra_keywords=["KAS", "MASUK", "KELUAR"]),
             use_container_width=True, hide_index=True
         )
+
+# TAB 12: LAPORAN BULANAN
+with tab12:
+    st.markdown("### 📅 Laporan Bulanan")
+    st.caption("Filter bulan di bawah ini independen dari filter tanggal di sidebar.")
+
+    _all_dates_lb = pd.concat([
+        df_penjualan_raw["Tanggal_Lengkap"]      if not df_penjualan_raw.empty      and "Tanggal_Lengkap" in df_penjualan_raw.columns      else pd.Series(dtype="datetime64[ns]"),
+        df_penjualan_luar_raw["Tanggal_Lengkap"] if not df_penjualan_luar_raw.empty and "Tanggal_Lengkap" in df_penjualan_luar_raw.columns else pd.Series(dtype="datetime64[ns]"),
+        df_pengeluaran_raw["Tanggal_Lengkap"]    if not df_pengeluaran_raw.empty    and "Tanggal_Lengkap" in df_pengeluaran_raw.columns    else pd.Series(dtype="datetime64[ns]"),
+        df_kas_raw["Tanggal_Kas"]                if not df_kas_raw.empty            and "Tanggal_Kas"     in df_kas_raw.columns            else pd.Series(dtype="datetime64[ns]"),
+        df_ekspedisi_raw["Tanggal_Lengkap"]      if not df_ekspedisi_raw.empty      and "Tanggal_Lengkap" in df_ekspedisi_raw.columns      else pd.Series(dtype="datetime64[ns]"),
+    ]).dropna()
+
+    if _all_dates_lb.empty:
+        st.info("Belum ada data bertanggal yang bisa dijadikan Laporan Bulanan.")
+    else:
+        _NAMA_BULAN_ID = {
+            "January": "Januari", "February": "Februari", "March": "Maret", "April": "April",
+            "May": "Mei", "June": "Juni", "July": "Juli", "August": "Agustus",
+            "September": "September", "October": "Oktober", "November": "November", "December": "Desember"
+        }
+        def _label_bulan_id(p):
+            eng = p.strftime("%B %Y")
+            for en, idn in _NAMA_BULAN_ID.items():
+                eng = eng.replace(en, idn)
+            return eng
+
+        _bulan_opts_lb = sorted(_all_dates_lb.dt.to_period("M").unique(), reverse=True)
+        sel_bulan_lb = st.selectbox(
+            "🗓️ Pilih Bulan", _bulan_opts_lb,
+            format_func=_label_bulan_id, index=0, key="tab12_bulan"
+        )
+        awal_bulan_lb  = sel_bulan_lb.to_timestamp()
+        akhir_bulan_lb = awal_bulan_lb + pd.offsets.MonthEnd(0)
+
+        def _filter_bulan_lb(df, col):
+            if df is None or df.empty or col not in df.columns:
+                return pd.DataFrame()
+            return df[(df[col] >= awal_bulan_lb) & (df[col] <= akhir_bulan_lb)]
+
+        def _hitung_sisa_lb(df):
+            if df is None or df.empty:
+                return 0.0
+            cols_h = list(df.columns)
+            hutang_col  = next((c for c in cols_h if c.strip().upper() in ["HUTANG", "JUMLAH HUTANG", "TOTAL HUTANG", "PINJAMAN"]), None)
+            payment_col = next((c for c in cols_h if c.strip().upper() in ["PAYMENT", "BAYAR", "TERBAYAR", "PEMBAYARAN", "ANGSURAN"]), None)
+            sisa_col    = next((c for c in cols_h if any(k in c.strip().upper() for k in ["SISA", "OUTSTANDING"])), None)
+            if sisa_col:
+                return float(to_number(df[sisa_col]).sum())
+            elif hutang_col and payment_col:
+                return float(to_number(df[hutang_col]).sum() - to_number(df[payment_col]).sum())
+            elif hutang_col:
+                return float(to_number(df[hutang_col]).sum())
+            return 0.0
+
+        st.markdown(f"#### Ringkasan Aktivitas — {_label_bulan_id(sel_bulan_lb)}")
+        st.write("")
+
+        # ===== Pendapatan & Laba per lini bisnis (aktivitas SELAMA bulan terpilih) =====
+        df_pl_lb  = _filter_bulan_lb(df_penjualan_raw, "Tanggal_Lengkap")
+        df_pll_lb = _filter_bulan_lb(df_penjualan_luar_raw, "Tanggal_Lengkap")
+        df_eks_lb = _filter_bulan_lb(df_ekspedisi_raw, "Tanggal_Lengkap")
+        df_kas_lb = _filter_bulan_lb(df_kas_raw, "Tanggal_Kas")
+
+        omzet_lapak_lb      = df_pl_lb["Total harga"].sum()  if "Total harga" in df_pl_lb.columns  else 0
+        laba_lapak_lb       = df_pl_lb["Keuntungan"].sum()   if "Keuntungan"  in df_pl_lb.columns  else 0
+        omzet_lapak_luar_lb = df_pll_lb["Total harga"].sum() if "Total harga" in df_pll_lb.columns else 0
+        laba_lapak_luar_lb  = df_pll_lb["Keuntungan"].sum()  if "Keuntungan"  in df_pll_lb.columns else 0
+        pendapatan_eks_lb   = df_eks_lb["PENDAPATAN"].sum()  if "PENDAPATAN"  in df_eks_lb.columns else 0
+        pengeluaran_eks_lb  = df_eks_lb["PENGELUARAN"].sum() if "PENGELUARAN" in df_eks_lb.columns else 0
+        laba_eks_lb         = pendapatan_eks_lb - pengeluaran_eks_lb
+        kas_masuk_lb        = df_kas_lb["KAS MASUK"].sum()   if "KAS MASUK"   in df_kas_lb.columns else 0
+        kas_keluar_lb       = df_kas_lb["KAS KELUAR"].sum()  if "KAS KELUAR"  in df_kas_lb.columns else 0
+
+        tgl_col_tp_lb = _find_tgl_panen_col(list(df_tanaman_sudah.columns)) if not df_tanaman_sudah.empty else None
+        omzet_tanaman_lb, laba_tanaman_lb = 0.0, 0.0
+        if tgl_col_tp_lb:
+            _tgl_parsed_tp_lb = pd.to_datetime(df_tanaman_sudah[tgl_col_tp_lb], dayfirst=True, errors="coerce")
+            df_tp_lb = df_tanaman_sudah[(_tgl_parsed_tp_lb >= awal_bulan_lb) & (_tgl_parsed_tp_lb <= akhir_bulan_lb)]
+            _omzet_col_tp_lb = _find_col_tanaman(df_tp_lb, ["omzet", "total harga", "pendapatan"])
+            omzet_tanaman_lb = to_number(df_tp_lb[_omzet_col_tp_lb]).sum() if _omzet_col_tp_lb else 0
+        if not df_biaya_bulanan_raw.empty and "Bulan_Num" in df_biaya_bulanan_raw.columns:
+            _biaya_lb = df_biaya_bulanan_raw[df_biaya_bulanan_raw["Bulan_Num"] == sel_bulan_lb.month]
+            biaya_berjalan_lb = _biaya_lb["BIAYA BERJALAN"].sum() if "BIAYA BERJALAN" in _biaya_lb.columns else 0
+        else:
+            biaya_berjalan_lb = 0
+        laba_tanaman_lb = omzet_tanaman_lb - biaya_berjalan_lb
+
+        total_omzet_lb = omzet_lapak_lb + omzet_lapak_luar_lb + pendapatan_eks_lb + omzet_tanaman_lb
+        total_laba_lb  = laba_lapak_lb + laba_lapak_luar_lb + laba_eks_lb + laba_tanaman_lb
+
+        st.markdown(
+            '<div class="hero-row">'
+            + hero_card("💰 Total Omzet Bulan Ini", rp(total_omzet_lb), "hero-blue")
+            + hero_card("📈 Total Laba Bulan Ini", rp(total_laba_lb), "hero-green" if total_laba_lb >= 0 else "hero-red")
+            + '</div>',
+            unsafe_allow_html=True
+        )
+        st.write("")
+
+        st.markdown("##### 🏪 Analisa Lapak & Lapak Luar")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Omzet Lapak", rp(omzet_lapak_lb))
+        c2.metric("Laba Lapak", rp(laba_lapak_lb))
+        c3.metric("Omzet Lapak Luar", rp(omzet_lapak_luar_lb))
+        c4.metric("Laba Lapak Luar", rp(laba_lapak_luar_lb))
+
+        st.markdown("##### 🌱 Tanaman Panen")
+        c5, c6 = st.columns(2)
+        c5.metric("Omzet Tanaman Panen", rp(omzet_tanaman_lb))
+        c6.metric("Laba Tanaman Panen", rp(laba_tanaman_lb))
+
+        st.markdown("##### 🚛 Ekspedisi")
+        c7, c8, c9 = st.columns(3)
+        c7.metric("Pendapatan Ekspedisi", rp(pendapatan_eks_lb))
+        c8.metric("Pengeluaran Ekspedisi", rp(pengeluaran_eks_lb))
+        c9.metric("Laba Ekspedisi", rp(laba_eks_lb))
+
+        st.markdown("##### 💸 Arus Kas")
+        c10, c11 = st.columns(2)
+        c10.metric("Kas Masuk Bulan Ini", rp(kas_masuk_lb))
+        c11.metric("Kas Keluar Bulan Ini", rp(kas_keluar_lb))
+
+        st.divider()
+        st.markdown("##### 📌 Posisi Keuangan Saat Ini")
+        st.caption("Bagian ini bersifat saldo/outstanding (bukan aktivitas per bulan), jadi selalu menampilkan angka terkini, tidak mengikuti bulan yang dipilih di atas.")
+
+        saldo_kas_lb = df_kas_raw["SALDO"].dropna().iloc[-1] if not df_kas_raw.empty and "SALDO" in df_kas_raw.columns and not df_kas_raw["SALDO"].dropna().empty else 0
+        sisa_piutang_lapak_lb      = df_piutang_raw["Sisa Hutang"].sum()      if not df_piutang_raw.empty      and "Sisa Hutang" in df_piutang_raw.columns      else 0
+        sisa_piutang_lapak_luar_lb = df_piutang_luar_raw["Sisa Hutang"].sum() if not df_piutang_luar_raw.empty and "Sisa Hutang" in df_piutang_luar_raw.columns else 0
+        sisa_hutang_petani_lb      = _hitung_sisa_lb(df_hutang_petani_raw)
+        sisa_hutang_pake_tani_lb   = _hitung_sisa_lb(df_hutang_pake_tani_raw)
+        sisa_kerugian_gudang_lb    = _hitung_sisa_lb(df_kerugian_gudang_raw)
+
+        p1, p2, p3 = st.columns(3)
+        p1.metric("🏦 Saldo Kas", rp(saldo_kas_lb))
+        p2.metric("🧾 Sisa Piutang Lapak", rp(sisa_piutang_lapak_lb))
+        p3.metric("🏬 Sisa Piutang Lapak Luar", rp(sisa_piutang_lapak_luar_lb))
+        p4, p5, p6 = st.columns(3)
+        p4.metric("👨‍🌾 Sisa Hutang Petani", rp(sisa_hutang_petani_lb))
+        p5.metric("🧑‍🌾 Sisa Hutang Pak'e Tani", rp(sisa_hutang_pake_tani_lb))
+        p6.metric("🏭 Sisa Kerugian Gudang", rp(sisa_kerugian_gudang_lb))
+
