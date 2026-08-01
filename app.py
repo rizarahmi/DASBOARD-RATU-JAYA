@@ -2868,6 +2868,13 @@ with tab2:
 
 # TAB 2B: ANALISA LAPAK LUAR
 with tab2b:
+    # Seluruh tab ini TIDAK ikut filter tanggal sidebar -- pakai data mentah
+    # (df_penjualan_luar_raw), bukan versi yang sudah dipotong sesuai rentang
+    # tanggal terpilih. Kalau tidak, begitu rentang tanggal terpilih kebetulan
+    # tidak ada transaksi Lapak Luar sama sekali (mis. baru masuk bulan baru),
+    # seluruh tab ini jadi kosong.
+    df_penjualan_luar = df_penjualan_luar_raw.copy()
+
     if df_penjualan_luar.empty:
         st.info("Data penjualan lapak luar kosong untuk periode yang dipilih.")
     else:
@@ -3684,23 +3691,21 @@ with tab5:
 # TAB 6: ARUS KAS
 with tab6:
     st.markdown("### 💸 Laporan Arus Kas")
-    if df_kas.empty:
-        st.info("Data Arus Kas kosong untuk periode yang dipilih.")
-    else:
-        masuk_kas  = df_kas["KAS MASUK"].sum()  if "KAS MASUK"  in df_kas.columns else 0
-        keluar_kas = df_kas["KAS KELUAR"].sum() if "KAS KELUAR" in df_kas.columns else 0
-        # Saldo Terakhir TIDAK ikut filter tanggal sidebar -- ini saldo kas
-        # sebenarnya saat ini, jadi selalu diambil dari data mentah (df_kas_raw),
-        # bukan dari df_kas yang sudah dipotong sesuai rentang tanggal terpilih.
-        saldo_kas  = df_kas_raw["SALDO"].dropna().iloc[-1] if not df_kas_raw.empty and "SALDO" in df_kas_raw.columns and not df_kas_raw["SALDO"].dropna().empty else 0
 
-        col_saldo, col_bank = st.columns([1, 2])
-        with col_saldo:
-            st.metric("🏦 Saldo Terakhir", rp(saldo_kas))
-        with col_bank:
-            bri_val = rp(saldo_bank_raw.get("bri")) if saldo_bank_raw.get("bri") is not None else "-"
-            bca_val = rp(saldo_bank_raw.get("bca")) if saldo_bank_raw.get("bca") is not None else "-"
-            st.markdown(f"""<table style="width:100%; border-collapse:collapse; text-align:center; margin-top:4px;">
+    # Saldo Terakhir & Saldo BRI/BCA TIDAK ikut filter tanggal sidebar sama
+    # sekali -- baik nilainya (sudah diambil dari data mentah) MAUPUN
+    # tampilannya (di luar guard "if df_kas.empty" di bawah), supaya tetap
+    # muncul walau periode yang dipilih di sidebar kebetulan tidak ada
+    # transaksi Arus Kasnya sama sekali.
+    saldo_kas  = df_kas_raw["SALDO"].dropna().iloc[-1] if not df_kas_raw.empty and "SALDO" in df_kas_raw.columns and not df_kas_raw["SALDO"].dropna().empty else 0
+
+    col_saldo, col_bank = st.columns([1, 2])
+    with col_saldo:
+        st.metric("🏦 Saldo Terakhir", rp(saldo_kas))
+    with col_bank:
+        bri_val = rp(saldo_bank_raw.get("bri")) if saldo_bank_raw.get("bri") is not None else "-"
+        bca_val = rp(saldo_bank_raw.get("bca")) if saldo_bank_raw.get("bca") is not None else "-"
+        st.markdown(f"""<table style="width:100%; border-collapse:collapse; text-align:center; margin-top:4px;">
 <tr>
 <th style="background:#2ca02c; color:#fff; padding:8px 10px; border:1px solid #cfe0cf; font-size:14px;">🏛️ SALDO BRI</th>
 <th style="background:#2ca02c; color:#fff; padding:8px 10px; border:1px solid #cfe0cf; font-size:14px;">🏛️ SALDO BCA</th>
@@ -3710,6 +3715,14 @@ with tab6:
 <td style="padding:10px; border:1px solid #e0e6f0; font-weight:800; font-size:20px; color:#1f3864;">{bca_val}</td>
 </tr>
 </table>""", unsafe_allow_html=True)
+
+    st.write("")
+
+    if df_kas.empty:
+        st.info("Data Arus Kas kosong untuk periode yang dipilih.")
+    else:
+        masuk_kas  = df_kas["KAS MASUK"].sum()  if "KAS MASUK"  in df_kas.columns else 0
+        keluar_kas = df_kas["KAS KELUAR"].sum() if "KAS KELUAR" in df_kas.columns else 0
 
         k4, k5, k6 = st.columns(3)
         k4.metric("🟩 Total Kas Masuk",  rp(masuk_kas))
