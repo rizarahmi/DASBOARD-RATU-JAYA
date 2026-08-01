@@ -473,6 +473,10 @@ def load_penjualan_lapak() -> pd.DataFrame:
         return None
 
     col_keterangan = _find(["keterangan", "ket", "note", "catatan"])
+    # Kolom X (index 23) khusus dipakai sebagai penanda "BS BUANG" untuk hitung
+    # Tonnase Terbuang di Rincian per Invoice -- dipisah dari col_keterangan di
+    # atas (yang dicari by nama, bisa jadi kolom lain) supaya tidak ambigu.
+    col_ket_buang = _col_at(23)
 
     rename_map = {}
     if col_tanggal and col_tanggal != "TANGGAL":
@@ -497,6 +501,8 @@ def load_penjualan_lapak() -> pd.DataFrame:
         rename_map[col_kode_lapak] = "KODE LAPAK"
     if col_keterangan and col_keterangan != "Keterangan":
         rename_map[col_keterangan] = "Keterangan"
+    if col_ket_buang:
+        rename_map[col_ket_buang] = "_RAW_KET_BUANG"
     if rename_map:
         df = df.rename(columns=rename_map)
         # Jaga-jaga: kalau salah satu target rename di atas kebetulan sudah ada
@@ -1983,19 +1989,20 @@ with tab2:
             # LAPAK) yang sama dengan invoice terpilih -- bukan lagi dicocokkan
             # tidak langsung lewat Jenis+Grade saja, supaya tidak ikut kebawa data
             # dari invoice lain yang kebetulan Jenis+Grade-nya sama.
-            df_pink_rpi = pd.DataFrame(columns=["TUJUAN", "JENIS", "GRADE", "JUMLAH MOVING", "STOK LAPAK", "Terjual", "Pendapatan", "Laba", "Modal", "Total Pendapatan"])
+            df_pink_rpi = pd.DataFrame(columns=["TUJUAN", "JENIS", "GRADE", "JUMLAH MOVING", "STOK LAPAK", "Terjual", "Pendapatan", "Laba", "Tonnase Terbuang", "Modal", "Total Pendapatan"])
             if not df_stok_lapak_invoice_raw.empty and "INVOICE" in df_stok_lapak_invoice_raw.columns \
                     and "TUJUAN" in df_stok_lapak_invoice_raw.columns:
                 df_pink_rpi = df_stok_lapak_invoice_raw[
                     (df_stok_lapak_invoice_raw["INVOICE"].astype(str) == sel_invoice_rpi)
                     & df_stok_lapak_invoice_raw["TUJUAN"].apply(is_filled)
                 ].reset_index(drop=True)
-                if gudang_invoice_rpi:
-                    # Kalau nama Lapak tujuan Moving SAMA PERSIS dengan nama Gudang
-                    # invoice ini, jangan ikut ditampilkan di tabel PINK -- datanya
-                    # itu sudah tercermin di tabel HIJAU (Data Gudang), jadi kalau
-                    # dua-duanya ditampilkan jadi dobel hitung.
-                    df_pink_rpi = df_pink_rpi[df_pink_rpi["TUJUAN"] != gudang_invoice_rpi].reset_index(drop=True)
+
+            # Kalau nama Lapak tujuan Moving (tabel PINK) SAMA PERSIS dengan nama
+            # Gudang invoice ini, tabel HIJAU (Data Gudang) yang dikosongkan --
+            # datanya sudah tercermin lewat tabel PINK, jadi kalau dua-duanya
+            # ditampilkan jadi dobel hitung.
+            if gudang_invoice_rpi and not df_pink_rpi.empty and gudang_invoice_rpi in df_pink_rpi["TUJUAN"].values:
+                df_green_rpi = df_green_rpi.iloc[0:0].copy()
 
             if not df_pink_rpi.empty:
                 jkg_p = to_number(df_pink_rpi["JUMLAH MOVING"]).fillna(0) if "JUMLAH MOVING" in df_pink_rpi.columns else pd.Series([0.0] * len(df_pink_rpi))
@@ -2026,7 +2033,24 @@ with tab2:
                             df_pj_lapak_grp_rpi, left_on=["TUJUAN", "JENIS", "GRADE"],
                             right_on=["KODE LAPAK", "JENIS", "GRADE"], how="left"
                         )
-                for _c in ["Terjual", "Pendapatan", "Laba"]:
+
+                    # Tonnase Terbuang: sheet PENJUALAN kolom P (Jumlah (KG)), HANYA
+                    # baris yang keterangannya (kolom X) = "BS BUANG", dicocokkan
+                    # Kode Lapak==Moving + Invoice terpilih + Jenis/Grade sama --
+                    # sama seperti Terjual/Pendapatan/Laba di atas, tapi ditapis
+                    # dulu ke baris barang buang saja.
+                    if "_RAW_KET_BUANG" in df_pj_valid_rpi.columns and "Jumlah (KG)" in df_pj_valid_rpi.columns:
+                        _ket_buang_norm = df_pj_valid_rpi["_RAW_KET_BUANG"].astype(str).str.strip().str.upper()
+                        df_pj_buang_rpi = df_pj_valid_rpi[_ket_buang_norm == "BS BUANG"]
+                        if not df_pj_buang_rpi.empty:
+                            df_pj_buang_grp_rpi = df_pj_buang_rpi.groupby(["KODE LAPAK", "JENIS", "GRADE"], as_index=False).agg(
+                                **{"Tonnase Terbuang": ("Jumlah (KG)", "sum")}
+                            )
+                            df_pink_rpi = df_pink_rpi.merge(
+                                df_pj_buang_grp_rpi, left_on=["TUJUAN", "JENIS", "GRADE"],
+                                right_on=["KODE LAPAK", "JENIS", "GRADE"], how="left", suffixes=("", "_buang")
+                            )
+                for _c in ["Terjual", "Pendapatan", "Laba", "Tonnase Terbuang"]:
                     if _c not in df_pink_rpi.columns:
                         df_pink_rpi[_c] = 0.0
                     df_pink_rpi[_c] = to_number(df_pink_rpi[_c]).fillna(0)
@@ -2047,13 +2071,15 @@ with tab2:
             total_laba_rpi = total_laba_gudang_rpi + total_laba_lapak_rpi
 
             total_moving_rpi = float(df_pink_rpi["JUMLAH MOVING"].sum()) if not df_pink_rpi.empty and "JUMLAH MOVING" in df_pink_rpi.columns else 0.0
+            total_tonnase_buang_rpi = float(df_pink_rpi["Tonnase Terbuang"].sum()) if not df_pink_rpi.empty and "Tonnase Terbuang" in df_pink_rpi.columns else 0.0
 
             st.write("")
-            agg_cols_rpi = st.columns(4)
+            agg_cols_rpi = st.columns(5)
             agg_cols_rpi[0].metric("💰 Modal Beli (Lahan)", rp(modal_beli_rpi))
             agg_cols_rpi[1].metric("📈 Total Pendapatan", rp(total_pendapatan_rpi))
             agg_cols_rpi[2].metric("💵 Total Laba", rp(total_laba_rpi))
             agg_cols_rpi[3].metric("🚚 Total Moving", f"{total_moving_rpi:,.0f} KG")
+            agg_cols_rpi[4].metric("🗑️ Total Tonnase Terbuang", f"{total_tonnase_buang_rpi:,.0f} KG")
             st.write("")
 
             def _esc_rpi(x):
@@ -2131,6 +2157,7 @@ with tab2:
                         f"<td class=\"rpi-num{end_cls_pk}\">{r['JUMLAH MOVING']:,.1f}</td>"
                         f"<td class=\"rpi-num{end_cls_pk}\">{r['STOK LAPAK']:,.1f}</td>"
                         f"<td class=\"rpi-num{end_cls_pk}\">{r['Terjual']:,.1f}</td>"
+                        f"<td class=\"rpi-num{end_cls_pk}\">{r['Tonnase Terbuang']:,.1f}</td>"
                         f"<td class=\"rpi-num{end_cls_pk}\">{_esc_rpi(rp(r['Pendapatan']))}</td>"
                         f"<td class=\"rpi-num{end_cls_pk}\">{_esc_rpi(rp(r['Laba']))}</td>"
                         f"{cell_total_pend}"
@@ -2145,12 +2172,13 @@ with tab2:
                     f'<td class="rpi-num">{df_pink_rpi["JUMLAH MOVING"].sum():,.1f}</td>'
                     f'<td class="rpi-num">{df_pink_rpi["STOK LAPAK"].sum():,.1f}</td>'
                     f'<td class="rpi-num">{df_pink_rpi["Terjual"].sum():,.1f}</td>'
+                    f'<td class="rpi-num">{df_pink_rpi["Tonnase Terbuang"].sum():,.1f}</td>'
                     f'<td class="rpi-num">{_esc_rpi(rp(df_pink_rpi["Pendapatan"].sum()))}</td>'
                     f'<td class="rpi-num">{_esc_rpi(rp(df_pink_rpi["Laba"].sum()))}</td>'
                     f'<td class="rpi-num">{_esc_rpi(rp(df_pink_rpi["Pendapatan"].sum()))}</td>'
                     f'<td class="rpi-num">{_esc_rpi(rp(df_pink_rpi["Modal"].sum()))}</td></tr>'
                     "<tr><th>Moving</th><th>Jenis</th><th>Grade</th><th>Jumlah (KG)</th><th>Stok (KG)</th>"
-                    "<th>Terjual</th><th>Pendapatan</th><th>Laba</th><th>Total Pendapatan</th><th>Modal</th></tr>"
+                    "<th>Terjual</th><th>Tonnase Terbuang</th><th>Pendapatan</th><th>Laba</th><th>Total Pendapatan</th><th>Modal</th></tr>"
                     "</thead>"
                     f'<tbody>{"".join(rows_p)}</tbody>'
                     "</table></div>"
@@ -4544,18 +4572,23 @@ with tab12:
         st.caption("Bagian ini bersifat saldo/outstanding (bukan aktivitas per bulan), jadi selalu menampilkan angka terkini, tidak mengikuti bulan yang dipilih di atas.")
 
         saldo_kas_lb = df_kas_raw["SALDO"].dropna().iloc[-1] if not df_kas_raw.empty and "SALDO" in df_kas_raw.columns and not df_kas_raw["SALDO"].dropna().empty else 0
+        saldo_bri_lb = saldo_bank_raw.get("bri")
+        saldo_bca_lb = saldo_bank_raw.get("bca")
         sisa_piutang_lapak_lb      = df_piutang_raw["Sisa Hutang"].sum()      if not df_piutang_raw.empty      and "Sisa Hutang" in df_piutang_raw.columns      else 0
         sisa_piutang_lapak_luar_lb = df_piutang_luar_raw["Sisa Hutang"].sum() if not df_piutang_luar_raw.empty and "Sisa Hutang" in df_piutang_luar_raw.columns else 0
         sisa_hutang_petani_lb      = _hitung_sisa_lb(df_hutang_petani_raw)
         sisa_hutang_pake_tani_lb   = _hitung_sisa_lb(df_hutang_pake_tani_raw)
         sisa_kerugian_gudang_lb    = _hitung_sisa_lb(df_kerugian_gudang_raw)
 
+        p0a, p0b, p0c = st.columns(3)
+        p0a.metric("🏦 Saldo Kas", rp(saldo_kas_lb))
+        p0b.metric("🏛️ Saldo BRI", rp(saldo_bri_lb) if saldo_bri_lb is not None else "-")
+        p0c.metric("🏛️ Saldo BCA", rp(saldo_bca_lb) if saldo_bca_lb is not None else "-")
         p1, p2, p3 = st.columns(3)
-        p1.metric("🏦 Saldo Kas", rp(saldo_kas_lb))
-        p2.metric("🧾 Sisa Piutang Lapak", rp(sisa_piutang_lapak_lb))
-        p3.metric("🏬 Sisa Piutang Lapak Luar", rp(sisa_piutang_lapak_luar_lb))
-        p4, p5, p6 = st.columns(3)
-        p4.metric("👨‍🌾 Sisa Hutang Petani", rp(sisa_hutang_petani_lb))
-        p5.metric("🧑‍🌾 Sisa Hutang Pak'e Tani", rp(sisa_hutang_pake_tani_lb))
-        p6.metric("🏭 Sisa Kerugian Gudang", rp(sisa_kerugian_gudang_lb))
+        p1.metric("🧾 Sisa Piutang Lapak", rp(sisa_piutang_lapak_lb))
+        p2.metric("🏬 Sisa Piutang Lapak Luar", rp(sisa_piutang_lapak_luar_lb))
+        p3.metric("👨‍🌾 Sisa Hutang Petani", rp(sisa_hutang_petani_lb))
+        p4, p5 = st.columns(2)
+        p4.metric("🧑‍🌾 Sisa Hutang Pak'e Tani", rp(sisa_hutang_pake_tani_lb))
+        p5.metric("🏭 Sisa Kerugian Gudang", rp(sisa_kerugian_gudang_lb))
 
