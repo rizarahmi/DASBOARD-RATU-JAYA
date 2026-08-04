@@ -402,6 +402,23 @@ def fetch_clean_csv(sheet_name: str) -> pd.DataFrame:
     return df.dropna(how="all").reset_index(drop=True)
 
 # LOADERS
+_BULAN_INDO_KE_INGGRIS = {
+    "MEI": "MAY", "AGU": "AUG", "AGT": "AUG", "OKT": "OCT", "DES": "DEC",
+}
+
+def _normalisasi_bulan_indo(series: pd.Series) -> pd.Series:
+    # Ganti singkatan bulan Bahasa Indonesia yang beda dari Inggris (Mei/Agu/
+    # Agt/Okt/Des) supaya pd.to_datetime() (yang default parsing pakai nama
+    # bulan Inggris: May/Aug/Oct/Dec) tidak gagal mem-parsing tanggal dari
+    # sheet yang formatnya "1-Agu-2026" dkk. Tanpa fix ini, baris dengan
+    # tanggal di bulan Mei/Agustus/Oktober/Desember jadi NaT dan hilang total
+    # dari SEMUA sorting/filter tanggal (termasuk baru masuk hari ini kalau
+    # kebetulan bulan berjalan salah satu dari empat itu).
+    s = series.astype(str)
+    for indo, eng in _BULAN_INDO_KE_INGGRIS.items():
+        s = s.str.replace(rf"(?i)\b{indo}\b", eng, regex=True)
+    return s
+
 def _parse_tanggal(df: pd.DataFrame) -> pd.DataFrame:
     cols = list(df.columns)
     if all(c in cols for c in ["Tanggal", "Bulan", "Tahun"]):
@@ -418,7 +435,7 @@ def _parse_tanggal(df: pd.DataFrame) -> pd.DataFrame:
             (c for c in cols if c.strip().upper() in ["TANGGAL", "TGL", "DATE", "DD/MM/YYYY"]),
             None
         )
-        df["Tanggal_Lengkap"] = pd.to_datetime(df[tgl_col], dayfirst=True, errors="coerce") if tgl_col else pd.NaT
+        df["Tanggal_Lengkap"] = pd.to_datetime(_normalisasi_bulan_indo(df[tgl_col]), dayfirst=True, errors="coerce") if tgl_col else pd.NaT
     return df
 
 @st.cache_data(ttl=300, show_spinner="Memuat Penjualan Lapak...")
@@ -647,7 +664,7 @@ def load_penjualan_lapak_luar() -> pd.DataFrame:
     df = _parse_tanggal(df)
 
     if "TANGGAL NOTA BALIK" in df.columns:
-        df["Tanggal_Nota_Balik"] = pd.to_datetime(df["TANGGAL NOTA BALIK"], dayfirst=True, errors="coerce")
+        df["Tanggal_Nota_Balik"] = pd.to_datetime(_normalisasi_bulan_indo(df["TANGGAL NOTA BALIK"]), dayfirst=True, errors="coerce")
 
     df["Is_Dibuang"] = df["Keterangan"].apply(is_filled) if "Keterangan" in df.columns else False
     if "INVOICE" in df.columns:
@@ -664,7 +681,7 @@ def load_arus_kas() -> pd.DataFrame:
     for col in ["KAS MASUK", "KAS KELUAR", "SALDO"]:
         if col in df.columns:
             df[col] = to_number(df[col])
-    df["Tanggal_Kas"] = pd.to_datetime(df["TANGGAL"], dayfirst=True, errors="coerce") if "TANGGAL" in df.columns else pd.NaT
+    df["Tanggal_Kas"] = pd.to_datetime(_normalisasi_bulan_indo(df["TANGGAL"]), dayfirst=True, errors="coerce") if "TANGGAL" in df.columns else pd.NaT
     if "JENIS" in df.columns:
         df["JENIS"] = df["JENIS"].astype(str).str.strip().str.upper()
     return df
@@ -818,7 +835,7 @@ def load_pengeluaran_lapak() -> pd.DataFrame:
     if nominal_col and nominal_col != "NOMINAL":
         df.rename(columns={nominal_col: "NOMINAL"}, inplace=True)
     tgl_col = next((c for c in df.columns if c.strip().upper() in ["TANGGAL", "TGL", "DATE"]), None)
-    df["Tanggal_Lengkap"] = pd.to_datetime(df[tgl_col], dayfirst=True, errors="coerce") if tgl_col else pd.NaT
+    df["Tanggal_Lengkap"] = pd.to_datetime(_normalisasi_bulan_indo(df[tgl_col]), dayfirst=True, errors="coerce") if tgl_col else pd.NaT
     lokasi_col = next((c for c in df.columns if "lokasi" in c.strip().lower() and "lapak" in c.strip().lower()), None)
     if lokasi_col:
         if lokasi_col != "LOKASI LAPAK":
@@ -879,7 +896,7 @@ def load_ekspedisi() -> pd.DataFrame:
         if col in df.columns:
             df[col] = to_number(df[col])
     tgl_col = next((c for c in df.columns if c.strip().upper() in ["TANGGAL", "TGL", "DATE"]), None)
-    df["Tanggal_Lengkap"] = pd.to_datetime(df[tgl_col], dayfirst=True, errors="coerce") if tgl_col else pd.NaT
+    df["Tanggal_Lengkap"] = pd.to_datetime(_normalisasi_bulan_indo(df[tgl_col]), dayfirst=True, errors="coerce") if tgl_col else pd.NaT
     nama_col = next((c for c in df.columns if c.strip().upper() == "NAMA"), None)
     if nama_col:
         df = df[df[nama_col].apply(is_filled)].reset_index(drop=True)
@@ -929,7 +946,7 @@ def load_piutang_lapak() -> pd.DataFrame:
         df["Sisa Hutang"] = df["Hutang"].fillna(0) - df["Payment"].fillna(0)
 
     tgl_col = next((c for c in df.columns if c.strip().upper() in ["TANGGAL", "TGL", "DATE"]), None)
-    df["Tanggal_Lengkap"] = pd.to_datetime(df[tgl_col], dayfirst=True, errors="coerce") if tgl_col else pd.NaT
+    df["Tanggal_Lengkap"] = pd.to_datetime(_normalisasi_bulan_indo(df[tgl_col]), dayfirst=True, errors="coerce") if tgl_col else pd.NaT
     return df
 
 @st.cache_data(ttl=300, show_spinner="Memuat Piutang Lapak Luar...")
@@ -977,7 +994,7 @@ def load_piutang_lapak_luar() -> pd.DataFrame:
         df["Sisa Hutang"] = to_number(df["Sisa Hutang"])
 
     tgl_col = next((c for c in df.columns if c.strip().upper() in ["TANGGAL", "TGL", "DATE"]), None)
-    df["Tanggal_Lengkap"] = pd.to_datetime(df[tgl_col], dayfirst=True, errors="coerce") if tgl_col else pd.NaT
+    df["Tanggal_Lengkap"] = pd.to_datetime(_normalisasi_bulan_indo(df[tgl_col]), dayfirst=True, errors="coerce") if tgl_col else pd.NaT
     return df
 
 @st.cache_data(ttl=300, show_spinner="Memuat Hutang Petani...")
@@ -1145,7 +1162,7 @@ def load_stok_lapak() -> pd.DataFrame:
         df = df[df["TUJUAN"].apply(is_filled)].reset_index(drop=True)
 
     if "TANGGAL" in df.columns:
-        df["Tanggal_Lengkap"] = pd.to_datetime(df["TANGGAL"], dayfirst=True, errors="coerce")
+        df["Tanggal_Lengkap"] = pd.to_datetime(_normalisasi_bulan_indo(df["TANGGAL"]), dayfirst=True, errors="coerce")
         batas_awal_stok = pd.Timestamp.now().normalize() - pd.Timedelta(days=14)
         df = df[df["Tanggal_Lengkap"] >= batas_awal_stok].reset_index(drop=True)
 
@@ -1238,7 +1255,7 @@ def load_stok_gudang() -> pd.DataFrame:
         df = df[df["TUJUAN"].apply(is_filled)].reset_index(drop=True)
 
     if "TANGGAL" in df.columns:
-        df["Tanggal_Lengkap"] = pd.to_datetime(df["TANGGAL"], dayfirst=True, errors="coerce")
+        df["Tanggal_Lengkap"] = pd.to_datetime(_normalisasi_bulan_indo(df["TANGGAL"]), dayfirst=True, errors="coerce")
 
     return df
 
@@ -1322,7 +1339,7 @@ def load_barang_masuk() -> pd.DataFrame:
         df = df[df["TUJUAN"].apply(is_filled)].reset_index(drop=True)
 
     if "TANGGAL" in df.columns:
-        df["Tanggal_Lengkap"] = pd.to_datetime(df["TANGGAL"], dayfirst=True, errors="coerce")
+        df["Tanggal_Lengkap"] = pd.to_datetime(_normalisasi_bulan_indo(df["TANGGAL"]), dayfirst=True, errors="coerce")
 
     return df
 
@@ -1390,7 +1407,7 @@ def load_stok_lapak_invoice() -> pd.DataFrame:
         df = df[df["TUJUAN"].apply(is_filled)].reset_index(drop=True)
 
     if "TANGGAL" in df.columns:
-        df["Tanggal_Lengkap"] = pd.to_datetime(df["TANGGAL"], dayfirst=True, errors="coerce")
+        df["Tanggal_Lengkap"] = pd.to_datetime(_normalisasi_bulan_indo(df["TANGGAL"]), dayfirst=True, errors="coerce")
 
     return df
 
@@ -1739,7 +1756,7 @@ if date_range and isinstance(date_range, tuple) and len(date_range) == 2:
 
     tgl_col_sudah = _find_tgl_panen_col(list(df_tanaman_sudah_filtered.columns))
     if tgl_col_sudah:
-        df_tanaman_sudah_filtered["_tgl_parsed"] = pd.to_datetime(df_tanaman_sudah_filtered[tgl_col_sudah], dayfirst=True, errors="coerce")
+        df_tanaman_sudah_filtered["_tgl_parsed"] = pd.to_datetime(_normalisasi_bulan_indo(df_tanaman_sudah_filtered[tgl_col_sudah]), dayfirst=True, errors="coerce")
         df_tanaman_sudah_filtered = df_tanaman_sudah_filtered[
             (df_tanaman_sudah_filtered["_tgl_parsed"] >= start_ts) &
             (df_tanaman_sudah_filtered["_tgl_parsed"] <= end_ts)
@@ -2868,11 +2885,14 @@ with tab2:
 
 # TAB 2B: ANALISA LAPAK LUAR
 with tab2b:
-    # Seluruh tab ini TIDAK ikut filter tanggal sidebar -- pakai data mentah
-    # (df_penjualan_luar_raw), bukan versi yang sudah dipotong sesuai rentang
-    # tanggal terpilih. Kalau tidak, begitu rentang tanggal terpilih kebetulan
-    # tidak ada transaksi Lapak Luar sama sekali (mis. baru masuk bulan baru),
-    # seluruh tab ini jadi kosong.
+    # Tabel rincian TIDAK ikut filter tanggal sidebar -- pakai data mentah
+    # (df_penjualan_luar_raw), supaya tabel tidak tiba-tiba kosong kalau
+    # rentang tanggal terpilih kebetulan tidak ada transaksi Lapak Luar sama
+    # sekali (mis. baru masuk bulan baru). Tapi metrik "Total Omzet"/"Total
+    # Laba" di atas tabel TETAP ikut filter tanggal sidebar (bulan berjalan
+    # secara default) -- makanya versi ter-filter disimpan dulu di variabel
+    # terpisah SEBELUM df_penjualan_luar di-override jadi versi mentah.
+    df_penjualan_luar_bulan_ini = df_penjualan_luar.copy()
     df_penjualan_luar = df_penjualan_luar_raw.copy()
 
     if df_penjualan_luar.empty:
@@ -2912,11 +2932,22 @@ with tab2b:
                     if sel_nama_rincian else df_rincian_luar.iloc[0:0]
                 )
 
-            total_omzet_rincian = df_rincian_luar["Total harga"].sum() if "Total harga" in df_rincian_luar.columns else 0
-            total_laba_rincian  = df_rincian_luar["Keuntungan"].sum()  if "Keuntungan"  in df_rincian_luar.columns else 0
+            # Total Omzet/Laba di atas mengikuti filter tanggal sidebar (bulan
+            # berjalan secara default) + filter nama yang sama dengan tabel di
+            # bawah -- pakai df_penjualan_luar_bulan_ini (bukan df_rincian_luar
+            # yang sudah tidak difilter tanggal), supaya angkanya scope ke bulan
+            # berjalan sementara tabelnya sendiri tetap menampilkan semua data.
+            df_metrik_luar_bulan = df_penjualan_luar_bulan_ini.copy()
+            if has_nama_luar and NAMA_COL_LUAR in df_metrik_luar_bulan.columns:
+                df_metrik_luar_bulan = (
+                    df_metrik_luar_bulan[df_metrik_luar_bulan[NAMA_COL_LUAR].astype(str).isin(sel_nama_rincian)]
+                    if sel_nama_rincian else df_metrik_luar_bulan.iloc[0:0]
+                )
+            total_omzet_rincian = df_metrik_luar_bulan["Total harga"].sum() if "Total harga" in df_metrik_luar_bulan.columns else 0
+            total_laba_rincian  = df_metrik_luar_bulan["Keuntungan"].sum()  if "Keuntungan"  in df_metrik_luar_bulan.columns else 0
             rf1, rf2 = st.columns(2)
-            rf1.metric("💰 Total Omzet (sesuai filter nama)", rp(total_omzet_rincian))
-            rf2.metric("📈 Total Laba (sesuai filter nama)", rp(total_laba_rincian))
+            rf1.metric("💰 Total Omzet (bulan berjalan, sesuai filter nama)", rp(total_omzet_rincian))
+            rf2.metric("📈 Total Laba (bulan berjalan, sesuai filter nama)", rp(total_laba_rincian))
 
             # Total per invoice dihitung setelah filter nama diterapkan, supaya tetap
             # akurat ke baris yang sedang tampil kalau tabelnya geser karena difilter.
@@ -4534,7 +4565,7 @@ with tab12:
         tgl_col_tp_lb = _find_tgl_panen_col(list(df_tanaman_sudah.columns)) if not df_tanaman_sudah.empty else None
         omzet_tanaman_lb, laba_tanaman_lb = 0.0, 0.0
         if tgl_col_tp_lb:
-            _tgl_parsed_tp_lb = pd.to_datetime(df_tanaman_sudah[tgl_col_tp_lb], dayfirst=True, errors="coerce")
+            _tgl_parsed_tp_lb = pd.to_datetime(_normalisasi_bulan_indo(df_tanaman_sudah[tgl_col_tp_lb]), dayfirst=True, errors="coerce")
             df_tp_lb = df_tanaman_sudah[(_tgl_parsed_tp_lb >= awal_bulan_lb) & (_tgl_parsed_tp_lb <= akhir_bulan_lb)]
             _omzet_col_tp_lb = _find_col_tanaman(df_tp_lb, ["omzet", "total harga", "pendapatan"])
             omzet_tanaman_lb = to_number(df_tp_lb[_omzet_col_tp_lb]).sum() if _omzet_col_tp_lb else 0
