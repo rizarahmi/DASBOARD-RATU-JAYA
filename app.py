@@ -3386,33 +3386,76 @@ with tab3:
 
             if omzet_col_sudah:
                 df_tanaman_sudah[omzet_col_sudah] = to_number(df_tanaman_sudah[omzet_col_sudah])
-                if omzet_col_sudah in df_tanaman_sudah_filtered.columns:
-                    df_tanaman_sudah_filtered[omzet_col_sudah] = to_number(df_tanaman_sudah_filtered[omzet_col_sudah])
             if laba_col_sudah:
                 df_tanaman_sudah[laba_col_sudah] = to_number(df_tanaman_sudah[laba_col_sudah])
-                if laba_col_sudah in df_tanaman_sudah_filtered.columns:
-                    df_tanaman_sudah_filtered[laba_col_sudah] = to_number(df_tanaman_sudah_filtered[laba_col_sudah])
             if luas_col_sudah:
                 df_tanaman_sudah[luas_col_sudah] = to_number(df_tanaman_sudah[luas_col_sudah])
-                if luas_col_sudah in df_tanaman_sudah_filtered.columns:
-                    df_tanaman_sudah_filtered[luas_col_sudah] = to_number(df_tanaman_sudah_filtered[luas_col_sudah])
+
+            # Total Omzet/Laba/Luas Panen dikelompokkan per periode 4 bulan
+            # (April-Juli, Agustus-November, Desember-Maret), BUKAN per bulan
+            # kalender biasa -- dipilih lewat dropdown sendiri, independen dari
+            # filter tanggal sidebar. Tabel di bawah tetap menampilkan semua data.
+            _BULAN_ID_SINGKAT = {4:"Apr",5:"Mei",6:"Jun",7:"Jul",8:"Agu",9:"Sep",10:"Okt",11:"Nov",12:"Des",1:"Jan",2:"Feb",3:"Mar"}
+
+            def _periode_4bulan_mulai(tgl):
+                if pd.isna(tgl):
+                    return pd.NaT
+                b, t = tgl.month, tgl.year
+                if b in (4, 5, 6, 7):
+                    return pd.Timestamp(year=t, month=4, day=1)
+                elif b in (8, 9, 10, 11):
+                    return pd.Timestamp(year=t, month=8, day=1)
+                elif b == 12:
+                    return pd.Timestamp(year=t, month=12, day=1)
+                else:
+                    return pd.Timestamp(year=t - 1, month=12, day=1)
+
+            def _periode_4bulan_akhir(mulai):
+                return mulai + pd.DateOffset(months=4) - pd.DateOffset(days=1)
+
+            def _label_periode_4bulan(mulai):
+                akhir = _periode_4bulan_akhir(mulai)
+                lbl_awal = f"{_BULAN_ID_SINGKAT[mulai.month]} {mulai.year}"
+                lbl_akhir = f"{_BULAN_ID_SINGKAT[akhir.month]} {akhir.year}"
+                return f"{lbl_awal} – {lbl_akhir}"
+
+            tgl_col_periode = _find_tgl_panen_col(list(df_tanaman_sudah.columns))
+            df_periode_src = None
+            if tgl_col_periode:
+                df_periode_src = df_tanaman_sudah.copy()
+                df_periode_src["_tgl_panen_periode"] = pd.to_datetime(
+                    _normalisasi_bulan_indo(df_periode_src[tgl_col_periode]), dayfirst=True, errors="coerce"
+                )
+                df_periode_src["_periode_mulai"] = df_periode_src["_tgl_panen_periode"].apply(_periode_4bulan_mulai)
+
+            if df_periode_src is not None and df_periode_src["_periode_mulai"].notna().any():
+                periode_opts = sorted(df_periode_src["_periode_mulai"].dropna().unique(), reverse=True)
+                sel_periode = st.selectbox(
+                    "🗓️ Periode 4 Bulan", periode_opts,
+                    format_func=lambda p: _label_periode_4bulan(pd.Timestamp(p)),
+                    index=0, key="tanaman_sudah_periode_4bulan"
+                )
+                df_tanaman_sudah_periode = df_periode_src[df_periode_src["_periode_mulai"] == sel_periode]
+            else:
+                st.info("Kolom Tanggal Panen tidak ditemukan, menampilkan seluruh data (tidak dikelompokkan per periode).")
+                df_tanaman_sudah_periode = df_tanaman_sudah
 
             panen_s1, panen_s2, panen_s3 = st.columns(3)
             if omzet_col_sudah:
-                total_omzet_panen = df_tanaman_sudah_filtered[omzet_col_sudah].sum() if omzet_col_sudah in df_tanaman_sudah_filtered.columns else df_tanaman_sudah[omzet_col_sudah].sum()
-                panen_s1.metric("💰 Total Omzet Panen (Filter)", rp(total_omzet_panen))
+                total_omzet_panen = df_tanaman_sudah_periode[omzet_col_sudah].sum() if omzet_col_sudah in df_tanaman_sudah_periode.columns else 0
+                panen_s1.metric("💰 Total Omzet Panen (Periode)", rp(total_omzet_panen))
             else:
                 panen_s1.info("Kolom Omzet tidak ditemukan")
 
             if laba_col_sudah:
-                total_laba_panen = df_tanaman_sudah_filtered[laba_col_sudah].sum() if laba_col_sudah in df_tanaman_sudah_filtered.columns else df_tanaman_sudah[laba_col_sudah].sum()
-                panen_s2.metric("📈 Total Laba Panen (Filter)", rp(total_laba_panen))
+                total_laba_panen = df_tanaman_sudah_periode[laba_col_sudah].sum() if laba_col_sudah in df_tanaman_sudah_periode.columns else 0
+                panen_s2.metric("📈 Total Laba Panen (Periode)", rp(total_laba_panen))
             else:
                 panen_s2.info("Kolom Laba tidak ditemukan")
 
             if luas_col_sudah:
-                total_luas_panen = df_tanaman_sudah[luas_col_sudah].sum()
-                panen_s3.metric("🌍 Total Luas Panen", f"{total_luas_panen:,.2f} Ha")
+                total_luas_panen = df_tanaman_sudah_periode[luas_col_sudah].sum() if luas_col_sudah in df_tanaman_sudah_periode.columns else 0
+                panen_s3.metric("🌍 Total Luas Panen (Periode)", f"{total_luas_panen:,.2f} Ha")
             else:
                 panen_s3.info("Kolom Luas (Ha) tidak ditemukan")
 
