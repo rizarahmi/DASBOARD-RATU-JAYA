@@ -2230,16 +2230,30 @@ with tab2:
     frames_stok = []
     stok_warnings = []
 
+    # Peta Invoice -> Tanggal dari BARANG_MASUK (sumber tanggal yang sudah
+    # terbukti reliable), dipakai untuk menentukan tanggal baris STOK LAPAK --
+    # BUKAN kolom tanggal di sheet STOK LAPAK itu sendiri, karena stok Lapak
+    # adalah bagian dari invoice yang sama, jadi tanggal aslinya ngikut kapan
+    # invoice itu masuk gudang.
+    peta_tgl_invoice = {}
+    if not df_barang_masuk_raw.empty and "INVOICE" in df_barang_masuk_raw.columns and "Tanggal_Lengkap" in df_barang_masuk_raw.columns:
+        peta_tgl_invoice = (
+            df_barang_masuk_raw.dropna(subset=["Tanggal_Lengkap"])
+            .drop_duplicates(subset=["INVOICE"])
+            .set_index("INVOICE")["Tanggal_Lengkap"]
+            .to_dict()
+        )
+
     if df_stok_lapak_invoice_raw.empty:
         stok_warnings.append("Sheet 'STOK LAPAK' kosong atau tidak ditemukan.")
-    elif not all(c in df_stok_lapak_invoice_raw.columns for c in ["TUJUAN", "STOK LAPAK", "INVOICE", "Tanggal_Lengkap"]):
-        stok_warnings.append("Kolom 'TUJUAN'/'STOK LAPAK'/'INVOICE'/Tanggal tidak lengkap di sheet STOK LAPAK.")
+    elif not all(c in df_stok_lapak_invoice_raw.columns for c in ["TUJUAN", "STOK LAPAK", "INVOICE"]):
+        stok_warnings.append("Kolom 'TUJUAN'/'STOK LAPAK'/'INVOICE' tidak lengkap di sheet STOK LAPAK.")
     else:
         tmp_sl = df_stok_lapak_invoice_raw[df_stok_lapak_invoice_raw["TUJUAN"].apply(is_filled)].copy()
-        # Ikut filter tanggal sidebar (bulan berjalan secara default), bukan lagi
-        # jendela tetap 14 hari terakhir -- supaya konsisten dengan periode yang
-        # sedang dipilih user di sidebar.
-        tmp_sl = tmp_sl[(tmp_sl["Tanggal_Lengkap"] >= start_ts) & (tmp_sl["Tanggal_Lengkap"] <= end_ts)]
+        # Ikut filter tanggal sidebar (bulan berjalan secara default), pakai
+        # tanggal invoice dari BARANG_MASUK (lihat peta_tgl_invoice di atas).
+        tmp_sl["Tanggal_Invoice"] = tmp_sl["INVOICE"].map(peta_tgl_invoice)
+        tmp_sl = tmp_sl[tmp_sl["Tanggal_Invoice"].notna() & (tmp_sl["Tanggal_Invoice"] >= start_ts) & (tmp_sl["Tanggal_Invoice"] <= end_ts)]
         tmp_sl["Tipe"] = "Lapak"
         tmp_sl["Stok (KG)"] = tmp_sl["STOK LAPAK"]
         frames_stok.append(tmp_sl[["Tipe", "TUJUAN", "INVOICE", "Stok (KG)"]])
