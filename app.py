@@ -2227,10 +2227,6 @@ with tab2:
 
     section_heading("📦 Stok Lapak & Gudang")
 
-    def _cutoff_tanggal_stok(tujuan):
-        hari = 7 if str(tujuan).strip().upper() == "GDC" else 14
-        return pd.Timestamp.now().normalize() - pd.Timedelta(days=hari)
-
     frames_stok = []
     stok_warnings = []
 
@@ -2240,7 +2236,10 @@ with tab2:
         stok_warnings.append("Kolom 'TUJUAN'/'STOK LAPAK'/'INVOICE'/Tanggal tidak lengkap di sheet STOK LAPAK.")
     else:
         tmp_sl = df_stok_lapak_invoice_raw[df_stok_lapak_invoice_raw["TUJUAN"].apply(is_filled)].copy()
-        tmp_sl = tmp_sl[tmp_sl["Tanggal_Lengkap"] >= tmp_sl["TUJUAN"].apply(_cutoff_tanggal_stok)]
+        # Ikut filter tanggal sidebar (bulan berjalan secara default), bukan lagi
+        # jendela tetap 14 hari terakhir -- supaya konsisten dengan periode yang
+        # sedang dipilih user di sidebar.
+        tmp_sl = tmp_sl[(tmp_sl["Tanggal_Lengkap"] >= start_ts) & (tmp_sl["Tanggal_Lengkap"] <= end_ts)]
         tmp_sl["Tipe"] = "Lapak"
         tmp_sl["Stok (KG)"] = tmp_sl["STOK LAPAK"]
         frames_stok.append(tmp_sl[["Tipe", "TUJUAN", "INVOICE", "Stok (KG)"]])
@@ -2254,7 +2253,7 @@ with tab2:
             df_barang_masuk_raw["TUJUAN"].apply(is_filled)
             & df_barang_masuk_raw["TUJUAN"].astype(str).str.strip().str.upper().isin(["GDC", "GDM"])
         ].copy()
-        tmp_sg = tmp_sg[tmp_sg["Tanggal_Lengkap"] >= tmp_sg["TUJUAN"].apply(_cutoff_tanggal_stok)]
+        tmp_sg = tmp_sg[(tmp_sg["Tanggal_Lengkap"] >= start_ts) & (tmp_sg["Tanggal_Lengkap"] <= end_ts)]
         tmp_sg["Tipe"] = "Gudang"
         tmp_sg["Stok (KG)"] = tmp_sg["STOK GUDANG"]
         frames_stok.append(tmp_sg[["Tipe", "TUJUAN", "INVOICE", "Stok (KG)"]])
@@ -3099,11 +3098,14 @@ with tab2b:
         st.divider()
 
         if has_kg_luar:
-            df_ton_all_luar = df_penjualan_luar.copy()
+            # Ikut filter tanggal sidebar (bulan berjalan), sama seperti Total
+            # Omzet/Laba di atas -- bukan df_penjualan_luar yang sudah tidak
+            # difilter tanggal (dipakai khusus untuk tabel rincian).
+            df_ton_all_luar = df_penjualan_luar_bulan_ini.copy()
             df_ton_all_luar[KG_COL_LUAR] = to_number(df_ton_all_luar[KG_COL_LUAR])
             total_kg_terjual_luar = df_ton_all_luar[KG_COL_LUAR].sum()
 
-            st.metric("⚖️ Total Tonnase Terjual", f"{total_kg_terjual_luar:,.1f} KG")
+            st.metric("⚖️ Total Tonnase Terjual (Bulan Berjalan)", f"{total_kg_terjual_luar:,.1f} KG")
             st.divider()
 
         section_heading("📊 Omzet & Profit per Pelanggan")
