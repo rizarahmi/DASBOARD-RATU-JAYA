@@ -540,7 +540,16 @@ def load_penjualan_lapak() -> pd.DataFrame:
 
     df = _parse_tanggal(df)
 
-    df["Is_Dibuang"] = df["Keterangan"].apply(is_filled) if "Keterangan" in df.columns else False
+    # Is_Dibuang = True HANYA kalau keterangan di kolom X (_RAW_KET_BUANG) PERSIS
+    # "BS BUANG" (tanpa peduli besar/kecil huruf) -- BUKAN sekadar "kolom
+    # Keterangan terisi apa saja", yang sebelumnya salah total (banyak baris
+    # normal juga punya Keterangan terisi, jadi ke-tandai "dibuang" padahal
+    # bukan, dan sebaliknya baris BS BUANG yang sebenarnya malah tidak
+    # terdeteksi kalau nilainya tidak match persis).
+    if "_RAW_KET_BUANG" in df.columns:
+        df["Is_Dibuang"] = df["_RAW_KET_BUANG"].astype(str).str.strip().str.upper() == "BS BUANG"
+    else:
+        df["Is_Dibuang"] = False
     if "KODE LAPAK" in df.columns:
         df = df[df["KODE LAPAK"].apply(is_filled)].reset_index(drop=True)
 
