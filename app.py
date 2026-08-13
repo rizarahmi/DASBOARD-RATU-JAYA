@@ -1036,6 +1036,12 @@ def load_hutang_petani() -> pd.DataFrame:
         rename_map[col_payment] = "PAYMENT"
     if rename_map:
         df = df.rename(columns=rename_map)
+        # Jaga-jaga: kalau salah satu target rename di atas kebetulan sudah ada
+        # sebagai nama kolom asli di posisi lain (mis. ada kolom "HUTANG" lain di
+        # sheet selain posisi C), df["HUTANG"] bisa mengembalikan DataFrame
+        # (bukan Series) dan bikin perhitungan Sisa Hutang jadi kacau tanpa
+        # error yang jelas. Kolom pertama (hasil rename posisi) yang dipertahankan.
+        df = df.loc[:, ~df.columns.duplicated()]
 
     for col in ["HUTANG", "PAYMENT"]:
         if col in df.columns:
@@ -3773,15 +3779,18 @@ with tab5:
                 df_hp = df_hutang_petani_raw.copy()
                 df_hp[hutang_col_hp]  = to_number(df_hp[hutang_col_hp])
                 df_hp[payment_col_hp] = to_number(df_hp[payment_col_hp])
-                df_hp["Sisa_Hutang"]  = df_hp[hutang_col_hp] - df_hp[payment_col_hp]
 
                 st.markdown("#### 👤 Total Hutang per Nama Petani")
                 per_nama_hp = (
                     df_hp.groupby(nama_col_hp)
-                    .agg(Total_Hutang=(hutang_col_hp, "sum"), Total_Terbayar=(payment_col_hp, "sum"), Sisa_Hutang=("Sisa_Hutang", "sum"))
+                    .agg(Total_Hutang=(hutang_col_hp, "sum"), Total_Terbayar=(payment_col_hp, "sum"))
                     .reset_index()
-                    .sort_values("Sisa_Hutang", ascending=False)
                 )
+                # Sisa Hutang dihitung LANGSUNG dari Total_Hutang - Total_Terbayar
+                # SETELAH groupby (bukan dijumlah dari kolom per-baris terpisah),
+                # supaya selalu konsisten persis dengan yang ditampilkan di tabel.
+                per_nama_hp["Sisa_Hutang"] = per_nama_hp["Total_Hutang"] - per_nama_hp["Total_Terbayar"]
+                per_nama_hp = per_nama_hp.sort_values("Sisa_Hutang", ascending=False)
                 # Yang sisanya persis 0 tidak perlu ditampilkan lagi.
                 per_nama_hp = per_nama_hp[per_nama_hp["Sisa_Hutang"].fillna(0) != 0].reset_index(drop=True)
 
