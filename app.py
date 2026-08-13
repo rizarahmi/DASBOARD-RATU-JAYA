@@ -1014,6 +1014,8 @@ def load_hutang_petani() -> pd.DataFrame:
     for col in df.columns:
         if any(k in col.upper() for k in ["HUTANG", "PAYMENT", "BAYAR", "SISA", "NOMINAL", "OUTSTANDING", "JUMLAH"]):
             df[col] = to_number(df[col])
+    tgl_col_hp = next((c for c in df.columns if c.strip().upper() in ["TANGGAL", "TGL", "DATE"]), None)
+    df["Tanggal_Lengkap"] = pd.to_datetime(_normalisasi_bulan_indo(df[tgl_col_hp]), dayfirst=True, errors="coerce") if tgl_col_hp else pd.NaT
     return df
 
 @st.cache_data(ttl=300, show_spinner="Memuat Kerugian Gudang...")
@@ -3717,43 +3719,6 @@ with tab4:
                 st.info("Kolom 'NAMA' / 'NAMA PELANGGAN' tidak ditemukan di sheet PIUTANG LAPAK LUAR.")
 
 # TAB 5: HUTANG
-def _render_hutang_section(df_raw, judul_total):
-    cols_h = list(df_raw.columns)
-    hutang_col  = next((c for c in cols_h if c.strip().upper() in ["HUTANG", "JUMLAH HUTANG", "TOTAL HUTANG", "PINJAMAN"]), None)
-    payment_col = next((c for c in cols_h if c.strip().upper() in ["PAYMENT", "BAYAR", "TERBAYAR", "PEMBAYARAN", "ANGSURAN"]), None)
-    sisa_col    = next((c for c in cols_h if any(k in c.strip().upper() for k in ["SISA", "OUTSTANDING"])), None)
-
-    if sisa_col:
-        total_sisa = to_number(df_raw[sisa_col]).sum()
-    elif hutang_col and payment_col:
-        total_sisa = to_number(df_raw[hutang_col]).sum() - to_number(df_raw[payment_col]).sum()
-    elif hutang_col:
-        total_sisa = to_number(df_raw[hutang_col]).sum()
-    else:
-        hutang_cols_all  = [c for c in cols_h if "HUTANG" in c.upper() and "SISA" not in c.upper()]
-        payment_cols_all = [c for c in cols_h if any(k in c.upper() for k in ["PAYMENT", "BAYAR", "TERBAYAR"])]
-        total_sisa = (
-            sum(to_number(df_raw[c]).sum() for c in hutang_cols_all)
-            - sum(to_number(df_raw[c]).sum() for c in payment_cols_all)
-        )
-
-    st.markdown(
-        f'<div class="big-total">{judul_total}: {rp(total_sisa)}</div>',
-        unsafe_allow_html=True
-    )
-
-    if hutang_col or sisa_col:
-        h1, h2, h3 = st.columns(3)
-        if hutang_col:
-            h1.metric("📋 Total Hutang",   rp(to_number(df_raw[hutang_col]).sum()))
-        if payment_col:
-            h2.metric("✅ Total Terbayar", rp(to_number(df_raw[payment_col]).sum()))
-        h3.metric("⚠️ Sisa Hutang",        rp(total_sisa))
-
-    st.divider()
-    st.markdown(f"**Total Data: {len(df_raw)} baris**")
-    st.dataframe(format_money_table(df_raw), use_container_width=True, hide_index=True)
-
 with tab5:
     st.markdown("### 👨‍🌾 Hutang")
 
@@ -3763,7 +3728,87 @@ with tab5:
         if df_hutang_petani_raw.empty:
             st.info("Data Hutang Petani kosong atau sheet tidak ditemukan.")
         else:
-            _render_hutang_section(df_hutang_petani_raw, "💳 Total Sisa Hutang Petani")
+            cols_hp = list(df_hutang_petani_raw.columns)
+            nama_col_hp    = next((c for c in cols_hp if c.strip().upper() in ["NAMA", "NAMA SUPLIER", "SUPLIER", "PETANI"]), None)
+            hutang_col_hp  = next((c for c in cols_hp if c.strip().upper() in ["HUTANG", "JUMLAH HUTANG", "TOTAL HUTANG", "PINJAMAN"]), None)
+            payment_col_hp = next((c for c in cols_hp if c.strip().upper() in ["PAYMENT", "BAYAR", "TERBAYAR", "PEMBAYARAN", "ANGSURAN"]), None)
+
+            if not nama_col_hp or not hutang_col_hp or not payment_col_hp:
+                st.warning(
+                    "Kolom 'NAMA'/'HUTANG'/'PAYMENT' tidak lengkap di sheet HUTANG PETANI. Kolom yang terbaca: "
+                    + ", ".join(str(c) for c in cols_hp)
+                )
+            else:
+                df_hp = df_hutang_petani_raw.copy()
+                df_hp[hutang_col_hp]  = to_number(df_hp[hutang_col_hp])
+                df_hp[payment_col_hp] = to_number(df_hp[payment_col_hp])
+                df_hp["Sisa_Hutang"]  = df_hp[hutang_col_hp] - df_hp[payment_col_hp]
+
+                st.markdown("#### 👤 Total Hutang per Nama Petani")
+                per_nama_hp = (
+                    df_hp.groupby(nama_col_hp)
+                    .agg(Total_Hutang=(hutang_col_hp, "sum"), Total_Terbayar=(payment_col_hp, "sum"), Sisa_Hutang=("Sisa_Hutang", "sum"))
+                    .reset_index()
+                    .sort_values("Sisa_Hutang", ascending=False)
+                )
+                # Yang sisanya persis 0 tidak perlu ditampilkan lagi.
+                per_nama_hp = per_nama_hp[per_nama_hp["Sisa_Hutang"].fillna(0) != 0].reset_index(drop=True)
+
+                fig_per_nama_hp = go.Figure()
+                fig_per_nama_hp.add_trace(go.Bar(
+                    x=per_nama_hp[nama_col_hp], y=per_nama_hp["Sisa_Hutang"],
+                    text=[rp_short(v) for v in per_nama_hp["Sisa_Hutang"]],
+                    textposition="outside", textfont=dict(size=12, color="#d62728"),
+                    marker_color="#d62728"
+                ))
+                fig_per_nama_hp.update_layout(
+                    title="Sisa Hutang per Nama Petani",
+                    xaxis_title="Nama Petani", yaxis_title="Rupiah",
+                    xaxis_tickangle=-30, showlegend=False
+                )
+                pad_yaxis(fig_per_nama_hp, per_nama_hp["Sisa_Hutang"].max() if not per_nama_hp.empty else 0)
+                st_plotly(fig_per_nama_hp, use_container_width=True)
+
+                tabel_nama_hp = per_nama_hp.copy()
+                tabel_nama_hp["Total_Hutang"]   = per_nama_hp["Total_Hutang"].apply(rp)
+                tabel_nama_hp["Total_Terbayar"] = per_nama_hp["Total_Terbayar"].apply(rp)
+                tabel_nama_hp["Sisa_Hutang"]    = per_nama_hp["Sisa_Hutang"].apply(rp)
+                tabel_nama_hp = tabel_nama_hp.rename(columns={
+                    nama_col_hp: "Nama", "Total_Hutang": "Total Hutang",
+                    "Total_Terbayar": "Total Terbayar", "Sisa_Hutang": "Sisa Hutang",
+                })
+                st.dataframe(tabel_nama_hp[["Nama", "Total Hutang", "Total Terbayar", "Sisa Hutang"]], use_container_width=True, hide_index=True)
+
+                st.divider()
+                st.markdown("#### 📋 Rincian Hutang Petani")
+                nama_opts_hp = sorted(df_hp[nama_col_hp].dropna().astype(str).unique())
+                sel_nama_hp = st.multiselect(
+                    "Filter Nama", nama_opts_hp, default=nama_opts_hp, key="tab5_hutang_petani_rincian_nama"
+                )
+                if sel_nama_hp:
+                    df_rincian_hp = df_hp[df_hp[nama_col_hp].astype(str).isin(sel_nama_hp)].copy()
+
+                    # Transaksi paling baru ditaruh paling atas.
+                    if "Tanggal_Lengkap" in df_rincian_hp.columns:
+                        df_rincian_hp["Tanggal"] = df_rincian_hp["Tanggal_Lengkap"].dt.strftime("%d/%m/%Y")
+                        df_rincian_hp = df_rincian_hp.sort_values("Tanggal_Lengkap", ascending=False, na_position="last")
+                    else:
+                        df_rincian_hp = df_rincian_hp.sort_values(nama_col_hp, ascending=True)
+
+                    kolom_tampil_hp = []
+                    if "Tanggal" in df_rincian_hp.columns:
+                        kolom_tampil_hp.append("Tanggal")
+                    kolom_tampil_hp += [nama_col_hp, hutang_col_hp, payment_col_hp]
+
+                    df_rincian_hp_tampil = df_rincian_hp[kolom_tampil_hp].rename(columns={
+                        nama_col_hp: "Nama", hutang_col_hp: "Hutang", payment_col_hp: "Payment",
+                    }).copy()
+                    df_rincian_hp_tampil["Hutang"]  = df_rincian_hp_tampil["Hutang"].map(rp)
+                    df_rincian_hp_tampil["Payment"] = df_rincian_hp_tampil["Payment"].map(rp)
+                    st.dataframe(df_rincian_hp_tampil, use_container_width=True, hide_index=True)
+                    st.caption(f"📌 {len(df_rincian_hp_tampil)} baris transaksi")
+                else:
+                    st.info("Pilih minimal satu nama untuk menampilkan rincian transaksinya.")
 
     with hutang_tab2:
         if df_hutang_pake_tani_raw.empty:
