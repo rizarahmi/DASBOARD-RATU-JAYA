@@ -3780,6 +3780,19 @@ with tab5:
                 df_hp[hutang_col_hp]  = to_number(df_hp[hutang_col_hp])
                 df_hp[payment_col_hp] = to_number(df_hp[payment_col_hp])
 
+                total_hutang_hp_all   = df_hp[hutang_col_hp].sum()
+                total_terbayar_hp_all = df_hp[payment_col_hp].sum()
+                total_sisa_hp_all     = total_hutang_hp_all - total_terbayar_hp_all
+                st.markdown(
+                    f'<div class="big-total">💳 Total Sisa Hutang Petani: {rp(total_sisa_hp_all)}</div>',
+                    unsafe_allow_html=True
+                )
+                hp_top1, hp_top2, hp_top3 = st.columns(3)
+                hp_top1.metric("📋 Total Hutang Petani", rp(total_hutang_hp_all))
+                hp_top2.metric("✅ Total Terbayar",       rp(total_terbayar_hp_all))
+                hp_top3.metric("⚠️ Sisa Hutang",          rp(total_sisa_hp_all))
+                st.divider()
+
                 st.markdown("#### 👤 Total Hutang per Nama Petani")
                 per_nama_hp = (
                     df_hp.groupby(nama_col_hp)
