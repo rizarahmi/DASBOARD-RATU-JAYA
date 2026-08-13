@@ -1008,14 +1008,45 @@ def load_piutang_lapak_luar() -> pd.DataFrame:
 
 @st.cache_data(ttl=300, show_spinner="Memuat Hutang Petani...")
 def load_hutang_petani() -> pd.DataFrame:
-    df = fetch_clean_csv(SHEET_HUTANG_PETANI)
+    # Posisi kolom dipakai langsung (bukan cari by nama) supaya reliable persis
+    # sesuai spesifikasi: kolom A=Tanggal, B=Nama, C=Hutang, D=Payment.
+    # fetch_raw_csv (bukan fetch_clean_csv) supaya posisi kolom tidak ikut
+    # bergeser walau ada kolom kosong/tanpa header di sheet.
+    df = fetch_raw_csv(SHEET_HUTANG_PETANI)
     if df.empty:
         return df
-    for col in df.columns:
-        if any(k in col.upper() for k in ["HUTANG", "PAYMENT", "BAYAR", "SISA", "NOMINAL", "OUTSTANDING", "JUMLAH"]):
+    all_cols = list(df.columns)
+
+    def _col_at(idx):
+        return all_cols[idx] if idx < len(all_cols) else None
+
+    col_tanggal = _col_at(0)
+    col_nama    = _col_at(1)
+    col_hutang  = _col_at(2)
+    col_payment = _col_at(3)
+
+    rename_map = {}
+    if col_tanggal and col_tanggal != "TANGGAL":
+        rename_map[col_tanggal] = "TANGGAL"
+    if col_nama and col_nama != "NAMA":
+        rename_map[col_nama] = "NAMA"
+    if col_hutang and col_hutang != "HUTANG":
+        rename_map[col_hutang] = "HUTANG"
+    if col_payment and col_payment != "PAYMENT":
+        rename_map[col_payment] = "PAYMENT"
+    if rename_map:
+        df = df.rename(columns=rename_map)
+
+    for col in ["HUTANG", "PAYMENT"]:
+        if col in df.columns:
             df[col] = to_number(df[col])
-    tgl_col_hp = next((c for c in df.columns if c.strip().upper() in ["TANGGAL", "TGL", "DATE"]), None)
-    df["Tanggal_Lengkap"] = pd.to_datetime(_normalisasi_bulan_indo(df[tgl_col_hp]), dayfirst=True, errors="coerce") if tgl_col_hp else pd.NaT
+    if "NAMA" in df.columns:
+        df["NAMA"] = df["NAMA"].astype(str).str.strip()
+    df["Tanggal_Lengkap"] = pd.to_datetime(_normalisasi_bulan_indo(df["TANGGAL"]), dayfirst=True, errors="coerce") if "TANGGAL" in df.columns else pd.NaT
+
+    df = drop_placeholder_cols(df)
+    if "NAMA" in df.columns:
+        df = df[df["NAMA"].apply(is_filled)].reset_index(drop=True)
     return df
 
 @st.cache_data(ttl=300, show_spinner="Memuat Kerugian Gudang...")
