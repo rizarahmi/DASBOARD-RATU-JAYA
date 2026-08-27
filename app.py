@@ -4445,8 +4445,11 @@ with tab11:
             st.dataframe(ringkasan_display_gh, use_container_width=True, hide_index=True)
 
         st.markdown("**🔍 Rincian Transaksi**")
+        df_gh_kas_display = df_gh_kas_raw.copy()
+        if "Tanggal_Lengkap" in df_gh_kas_display.columns:
+            df_gh_kas_display = df_gh_kas_display.sort_values("Tanggal_Lengkap", ascending=False, na_position="last")
         st.dataframe(
-            format_money_table(df_gh_kas_raw.drop(columns=["Tanggal_Lengkap"], errors="ignore"), extra_keywords=["KAS", "MASUK", "KELUAR"]),
+            format_money_table(df_gh_kas_display.drop(columns=["Tanggal_Lengkap"], errors="ignore"), extra_keywords=["KAS", "MASUK", "KELUAR"]),
             use_container_width=True, hide_index=True
         )
 
