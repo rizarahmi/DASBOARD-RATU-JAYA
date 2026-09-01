@@ -562,13 +562,15 @@ def load_penjualan_lapak_luar() -> pd.DataFrame:
     def _col_at(idx):
         return all_cols[idx] if idx < len(all_cols) else None
 
-    # Posisi kolom sheet PENJUALAN LAPAK LUAR:
-    # A=Tanggal, B=Tanggal Nota Balik, C=Invoice, D=Nama Pelanggan,
-    # H=Grade, J=Tonnase Nota Balik, R=Omzet, S=Laba.
-    # Omzet/Laba sudah 2x pindah posisi (S/T -> R/S) sementara header teksnya tetap
-    # "OMZET"/"LABA" -- jadi keduanya dicocokkan by nama dulu, posisi cuma cadangan.
-    col_tanggal       = _col_at(0)
-    col_tgl_notabalik = _col_at(1)
+    # Posisi kolom sheet LAPAK LUAR (spreadsheet DATA SAYA):
+    # B=Tanggal (dipakai untuk filter tanggal sidebar Omzet/Laba), C=Invoice,
+    # D=Nama Pelanggan. Layout ini beda dari sheet lama "PENJUALAN LAPAK LUAR" di
+    # DATA POKOK (yang A=Tanggal) karena sumber datanya sudah dipindah.
+    # "Tanggal Nota Balik" dicari by nama saja (bukan posisi tetap) karena posisi
+    # persisnya di sheet baru ini belum dikonfirmasi -- daripada menebak salah
+    # posisi dan ikut ke-collide dengan kolom B yang sekarang jadi Tanggal utama.
+    col_tanggal       = _col_at(1)
+    col_tgl_notabalik = next((c for c in all_cols if "nota balik" in c.strip().lower() or "tgl nota" in c.strip().lower()), None)
     col_invoice       = _col_at(2)
     col_nama          = _col_at(3)
     col_grade         = _col_at(7)
