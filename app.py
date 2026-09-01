@@ -562,15 +562,14 @@ def load_penjualan_lapak_luar() -> pd.DataFrame:
     def _col_at(idx):
         return all_cols[idx] if idx < len(all_cols) else None
 
-    # Posisi kolom sheet LAPAK LUAR (spreadsheet DATA SAYA):
-    # B=Tanggal (dipakai untuk filter tanggal sidebar Omzet/Laba), C=Invoice,
-    # D=Nama Pelanggan. Layout ini beda dari sheet lama "PENJUALAN LAPAK LUAR" di
-    # DATA POKOK (yang A=Tanggal) karena sumber datanya sudah dipindah.
-    # "Tanggal Nota Balik" dicari by nama saja (bukan posisi tetap) karena posisi
-    # persisnya di sheet baru ini belum dikonfirmasi -- daripada menebak salah
-    # posisi dan ikut ke-collide dengan kolom B yang sekarang jadi Tanggal utama.
-    col_tanggal       = _col_at(1)
-    col_tgl_notabalik = next((c for c in all_cols if "nota balik" in c.strip().lower() or "tgl nota" in c.strip().lower()), None)
+    # Posisi kolom sheet LAPAK LUAR (spreadsheet DATA SAYA): A=Tanggal, B=Tanggal
+    # Nota Balik, C=Invoice, D=Nama Pelanggan. Tanggal_Lengkap (dipakai untuk
+    # filter tanggal sidebar Omzet/Laba) diambil dari TANGGAL NOTA BALIK (kolom
+    # B), BUKAN dari kolom A -- lihat override eksplisit di bawah, setelah
+    # _parse_tanggal(), supaya tidak salah kepilih kolom A yang kebetulan juga
+    # sama-sama bisa kena keyword pencarian "TANGGAL".
+    col_tanggal       = _col_at(0)
+    col_tgl_notabalik = _col_at(1)
     col_invoice       = _col_at(2)
     col_nama          = _col_at(3)
     col_grade         = _col_at(7)
@@ -672,6 +671,11 @@ def load_penjualan_lapak_luar() -> pd.DataFrame:
 
     if "TANGGAL NOTA BALIK" in df.columns:
         df["Tanggal_Nota_Balik"] = pd.to_datetime(_normalisasi_bulan_indo(df["TANGGAL NOTA BALIK"]), dayfirst=True, errors="coerce")
+        # Filter tanggal sidebar (Omzet/Laba Lapak Luar) mengikuti TANGGAL NOTA
+        # BALIK (kolom B), BUKAN kolom Tanggal biasa (kolom A) -- Tanggal_Lengkap
+        # di-override supaya semua tempat yang filter berdasarkan Tanggal_Lengkap
+        # otomatis ikut pakai tanggal nota balik ini.
+        df["Tanggal_Lengkap"] = df["Tanggal_Nota_Balik"]
 
     df["Is_Dibuang"] = df["Keterangan"].apply(is_filled) if "Keterangan" in df.columns else False
     if "INVOICE" in df.columns:
