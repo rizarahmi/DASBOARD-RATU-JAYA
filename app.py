@@ -582,7 +582,7 @@ def load_penjualan_lapak_luar() -> pd.DataFrame:
         for n in names:
             m = [c for c in all_cols if c.strip().lower() == n.lower()]
             if m:
-                return m[0]
+                return m[1]
         return _col_at(idx)
 
     col_omzet = _find_or_pos(["omzet", "total harga", "total_harga"], 17)
@@ -591,7 +591,7 @@ def load_penjualan_lapak_luar() -> pd.DataFrame:
     def _find(names):
         for n in names:
             m = [c for c in all_cols if c.strip().lower() == n.lower()]
-            if m: return m[0]
+            if m: return m[1]
         return None
 
     col_tunai      = _find(["tunai", "cash"])
