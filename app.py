@@ -1522,21 +1522,27 @@ def load_gh_kas() -> pd.DataFrame:
     if df is None or df.empty:
         return df
 
-    # Kolom E (index 4) diambil DULU dari kolom mentah, SEBELUM drop_placeholder_cols
-    # (yang bisa membuang kolom tanpa header dan menggeser posisi) -- supaya
-    # "Biaya Berjalan" reliably persis kolom E asli, bukan posisi yang sudah
-    # bergeser.
-    _raw_cols_before_drop = list(df.columns)
-    col_biaya_berjalan_e = _raw_cols_before_drop[4] if len(_raw_cols_before_drop) > 4 else None
+    # Cari Kategori/Kas Masuk/Kas Keluar DULU (by nama) SEBELUM menyentuh kolom E
+    # by posisi -- supaya kalau kolom E ternyata sama dengan salah satu dari tiga
+    # ini, tidak ke-rename duluan jadi "_RAW_GH_BIAYA_BERJALAN_E" sebelum sempat
+    # ketemu (itu penyebab bug sebelumnya: kolom E collide dengan Kategori,
+    # groupby("Kategori") jadi KeyError karena kolomnya sudah kepakai nama lain).
+    all_cols_raw = list(df.columns)
+    kategori_col = _gh_find_col(all_cols_raw, ["Kategori", "Kategori Kas"])
+    masuk_col    = _gh_find_col(all_cols_raw, ["Kas Masuk", "Pemasukan", "Masuk"])
+    keluar_col   = _gh_find_col(all_cols_raw, ["Kas Keluar", "Pengeluaran", "Keluar"])
+
+    # Kolom E (index 4) untuk "Biaya Berjalan" -- diambil by posisi dari kolom
+    # mentah SEBELUM drop_placeholder_cols (yang bisa membuang kolom tanpa header
+    # dan menggeser posisi), TAPI hanya kalau posisinya belum kepakai oleh salah
+    # satu dari Kategori/Kas Masuk/Kas Keluar di atas.
+    col_biaya_berjalan_e = all_cols_raw[4] if len(all_cols_raw) > 4 else None
+    if col_biaya_berjalan_e in (kategori_col, masuk_col, keluar_col):
+        col_biaya_berjalan_e = None
     if col_biaya_berjalan_e:
         df = df.rename(columns={col_biaya_berjalan_e: "_RAW_GH_BIAYA_BERJALAN_E"})
 
     df = drop_placeholder_cols(df)
-    all_cols = list(df.columns)
-
-    kategori_col = _gh_find_col(all_cols, ["Kategori", "Kategori Kas"])
-    masuk_col    = _gh_find_col(all_cols, ["Kas Masuk", "Pemasukan", "Masuk"])
-    keluar_col   = _gh_find_col(all_cols, ["Kas Keluar", "Pengeluaran", "Keluar"])
 
     rename_map = {}
     for col, target in [
