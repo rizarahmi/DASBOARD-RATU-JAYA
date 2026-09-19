@@ -4029,7 +4029,7 @@ with tab7:
                     cls_sp = ' class="sp-row-merah"' if belum_selesai else ""
                     nominal_sp = r.get("NOMINAL SETORAN")
                     nominal_txt = rp(nominal_sp) if pd.notna(nominal_sp) else ""
-                    rentang_txt = f"{int(r['_rentang_waktu'])}" if pd.notna(r["_rentang_waktu"]) else ""
+                    rentang_txt = f"{int(r['_rentang_waktu'])} hari" if pd.notna(r["_rentang_waktu"]) else ""
                     rows_sp.append(
                         f"<tr{cls_sp}>"
                         f"<td>{_esc_sp(r.get('NOP'))}</td>"
@@ -4045,7 +4045,7 @@ with tab7:
                 sp_html = f"""<style>
 .sp-wrap {{ max-height: 480px; overflow: auto; border: 1px solid #e0e6f0; border-radius: 8px; }}
 .sp-table {{ width: 100%; border-collapse: collapse; font-size: 13.5px; }}
-.sp-table th {{ position: sticky; top: 0; background: #1f3864; color: #fff; padding: 9px 10px; text-align: left; white-space: nowrap; z-index: 1; }}
+.sp-table th {{ position: sticky; top: 0; background: #4FD1D9; color: #063a3d; padding: 9px 10px; text-align: left; white-space: nowrap; z-index: 1; }}
 .sp-table td {{ padding: 8px 10px; border-bottom: 1px solid #eef1f6; white-space: nowrap; }}
 .sp-table td.sp-num {{ text-align: right; }}
 .sp-table tr.sp-row-merah td {{ background: #fdecea; color: #a61b1b; font-weight: 700; }}
