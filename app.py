@@ -132,6 +132,7 @@ SHEET_PIUTANG         = "PIUTANG LAPAK"
 SHEET_PIUTANG_LUAR    = "PIUTANG LAPAK LUAR"
 SHEET_HUTANG_PETANI   = "HUTANG PETANI"
 SHEET_EKSPEDISI       = "EKSPEDISI"
+SHEET_STATUS_PERJALANAN = "STATUS PERJALANAN"
 SHEET_TANAMAN_BELUM   = "TANAMAN BELUM PANEN"
 SHEET_TANAMAN_SUDAH   = "TANAMAN PANEN"
 SHEET_KERUGIAN_GUDANG = "KERUGIAN GUDANG"
@@ -913,7 +914,56 @@ def load_ekspedisi() -> pd.DataFrame:
         df = df[df[nama_col].apply(is_filled)].reset_index(drop=True)
     return df
 
-@st.cache_data(ttl=300, show_spinner="Memuat Piutang Lapak...")
+@st.cache_data(ttl=300, show_spinner="Memuat Status Perjalanan...")
+def load_status_perjalanan() -> pd.DataFrame:
+    # Posisi kolom sheet STATUS PERJALANAN: A=NOP, B=Tgl Berangkat, C=Tgl Pulang,
+    # D=Nama, E=No Plat, F=Tujuan, G=Jenis Setoran, H=Nominal Setoran, I=Status.
+    # Posisi diambil dari kolom mentah (fetch_raw_csv, bukan fetch_clean_csv)
+    # supaya tidak bergeser walau ada kolom kosong/tanpa header di sheet.
+    df = fetch_raw_csv(SHEET_STATUS_PERJALANAN)
+    if df is None or df.empty:
+        return df
+    all_cols = list(df.columns)
+
+    def _col_at(idx):
+        return all_cols[idx] if idx < len(all_cols) else None
+
+    rename_map = {}
+    posisi = {
+        0: "NOP", 1: "TGL BERANGKAT", 2: "TGL PULANG", 3: "NAMA", 4: "NO PLAT",
+        5: "TUJUAN", 6: "JENIS SETORAN", 7: "NOMINAL SETORAN", 8: "STATUS",
+    }
+    for idx, target in posisi.items():
+        col = _col_at(idx)
+        if col and col != target:
+            rename_map[col] = target
+    if rename_map:
+        df = df.rename(columns=rename_map)
+        # Jaga-jaga: kalau salah satu target rename di atas kebetulan sudah ada
+        # sebagai nama kolom asli di posisi lain, df[col] bisa mengembalikan
+        # DataFrame (bukan Series). Kolom hasil rename posisi (lebih awal) yang
+        # dipertahankan.
+        df = df.loc[:, ~df.columns.duplicated()]
+
+    if "NOMINAL SETORAN" in df.columns:
+        df["NOMINAL SETORAN"] = to_number(df["NOMINAL SETORAN"])
+    for c in ["NAMA", "NO PLAT", "TUJUAN", "JENIS SETORAN", "STATUS"]:
+        if c in df.columns:
+            df[c] = df[c].astype(str).str.strip()
+
+    if "TGL BERANGKAT" in df.columns:
+        df["Tgl_Berangkat_Lengkap"] = pd.to_datetime(_normalisasi_bulan_indo(df["TGL BERANGKAT"]), dayfirst=True, errors="coerce")
+    else:
+        df["Tgl_Berangkat_Lengkap"] = pd.NaT
+    if "TGL PULANG" in df.columns:
+        df["Tgl_Pulang_Lengkap"] = pd.to_datetime(_normalisasi_bulan_indo(df["TGL PULANG"]), dayfirst=True, errors="coerce")
+    else:
+        df["Tgl_Pulang_Lengkap"] = pd.NaT
+
+    if "NAMA" in df.columns:
+        df = df[df["NAMA"].apply(is_filled)].reset_index(drop=True)
+
+    return df
 def load_piutang_lapak() -> pd.DataFrame:
     df = fetch_raw_csv(SHEET_PIUTANG)
     if df.empty:
@@ -1596,6 +1646,11 @@ try:
     saldo_bank_raw = load_saldo_bank()
 except Exception:
     saldo_bank_raw = {"bri": None, "bca": None}
+
+try:
+    df_status_perjalanan_raw = load_status_perjalanan()
+except Exception:
+    df_status_perjalanan_raw = pd.DataFrame()
 
 try:
     df_gh_tanaman_raw   = load_gh_tanaman()
@@ -3940,6 +3995,72 @@ with tab6:
 # TAB 7: EKSPEDISI
 with tab7:
     st.markdown("### 🚛 Operasional Ekspedisi")
+
+    section_heading("🚦 Status Perjalanan")
+    if df_status_perjalanan_raw.empty:
+        st.info("Sheet 'STATUS PERJALANAN' kosong atau belum ditemukan.")
+    else:
+        df_sp = df_status_perjalanan_raw.copy()
+        if "NAMA" in df_sp.columns and "NO PLAT" in df_sp.columns:
+            df_sp["_opsi_sp"] = df_sp["NAMA"].astype(str).str.strip() + " - " + df_sp["NO PLAT"].astype(str).str.strip()
+            opsi_sp = sorted(df_sp["_opsi_sp"].dropna().unique())
+            if not opsi_sp:
+                st.info("Belum ada data Nama/No Plat di sheet STATUS PERJALANAN.")
+            else:
+                sel_sp = st.selectbox("🚚 Pilih Armada (Nama - No Plat)", opsi_sp, index=0, key="tab7_status_perjalanan_armada")
+                df_sp_sel = df_sp[df_sp["_opsi_sp"] == sel_sp].copy()
+
+                # Rentang Waktu = selisih hari Tgl Pulang - Tgl Berangkat.
+                df_sp_sel["_rentang_waktu"] = (df_sp_sel["Tgl_Pulang_Lengkap"] - df_sp_sel["Tgl_Berangkat_Lengkap"]).dt.days
+
+                def _esc_sp(x):
+                    if x is None or (isinstance(x, float) and pd.isna(x)):
+                        return ""
+                    s = str(x)
+                    return (s.replace("&", "&amp;").replace("<", "&lt;")
+                             .replace(">", "&gt;").replace('"', "&quot;"))
+
+                def _fmt_tgl_sp(ts):
+                    return ts.strftime("%d/%m/%y") if pd.notna(ts) else ""
+
+                rows_sp = []
+                for _, r in df_sp_sel.iterrows():
+                    belum_selesai = str(r.get("STATUS", "")).strip().lower() == "belum selesai"
+                    cls_sp = ' class="sp-row-merah"' if belum_selesai else ""
+                    nominal_sp = r.get("NOMINAL SETORAN")
+                    nominal_txt = rp(nominal_sp) if pd.notna(nominal_sp) else ""
+                    rentang_txt = f"{int(r['_rentang_waktu'])}" if pd.notna(r["_rentang_waktu"]) else ""
+                    rows_sp.append(
+                        f"<tr{cls_sp}>"
+                        f"<td>{_esc_sp(r.get('NOP'))}</td>"
+                        f"<td>{_fmt_tgl_sp(r['Tgl_Berangkat_Lengkap'])}</td>"
+                        f"<td>{_fmt_tgl_sp(r['Tgl_Pulang_Lengkap'])}</td>"
+                        f"<td>{_esc_sp(r.get('TUJUAN'))}</td>"
+                        f"<td class=\"sp-num\">{nominal_txt}</td>"
+                        f"<td>{_esc_sp(r.get('JENIS SETORAN'))}</td>"
+                        f"<td class=\"sp-num\">{rentang_txt}</td>"
+                        "</tr>"
+                    )
+
+                sp_html = f"""<style>
+.sp-wrap {{ max-height: 480px; overflow: auto; border: 1px solid #e0e6f0; border-radius: 8px; }}
+.sp-table {{ width: 100%; border-collapse: collapse; font-size: 13.5px; }}
+.sp-table th {{ position: sticky; top: 0; background: #1f3864; color: #fff; padding: 9px 10px; text-align: left; white-space: nowrap; z-index: 1; }}
+.sp-table td {{ padding: 8px 10px; border-bottom: 1px solid #eef1f6; white-space: nowrap; }}
+.sp-table td.sp-num {{ text-align: right; }}
+.sp-table tr.sp-row-merah td {{ background: #fdecea; color: #a61b1b; font-weight: 700; }}
+</style>
+<div class="sp-panel-title" style="font-weight:800; font-size:15px; margin-bottom:6px;">{_esc_sp(sel_sp)}</div>
+<div class="sp-wrap"><table class="sp-table">
+<thead><tr><th>NOP</th><th>Tgl Berangkat</th><th>Tgl Pulang</th><th>Tujuan</th><th>Nominal Setoran</th><th>Jenis Setoran</th><th>Rentang Waktu</th></tr></thead>
+<tbody>{"".join(rows_sp)}</tbody>
+</table></div>"""
+                st.markdown(sp_html, unsafe_allow_html=True)
+                st.caption("🔴 Baris merah = perjalanan berstatus 'belum selesai'.")
+        else:
+            st.warning("Kolom 'NAMA'/'NO PLAT' tidak ditemukan di sheet STATUS PERJALANAN.")
+
+    st.divider()
 
     if df_ekspedisi.empty:
         st.info("Data Ekspedisi kosong untuk periode yang dipilih.")
