@@ -4010,6 +4010,11 @@ with tab7:
                 sel_sp = st.selectbox("🚚 Pilih Armada (Nama - No Plat)", opsi_sp, index=0, key="tab7_status_perjalanan_armada")
                 df_sp_sel = df_sp[df_sp["_opsi_sp"] == sel_sp].copy()
 
+                # NOP paling akhir (terbesar) ditaruh paling atas.
+                if "NOP" in df_sp_sel.columns:
+                    df_sp_sel["_nop_num"] = to_number(df_sp_sel["NOP"])
+                    df_sp_sel = df_sp_sel.sort_values("_nop_num", ascending=False, na_position="last")
+
                 # Rentang Waktu = selisih hari Tgl Pulang - Tgl Berangkat.
                 df_sp_sel["_rentang_waktu"] = (df_sp_sel["Tgl_Pulang_Lengkap"] - df_sp_sel["Tgl_Berangkat_Lengkap"]).dt.days
 
