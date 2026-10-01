@@ -1520,12 +1520,32 @@ def _gh_find_col(all_cols, candidates):
     return None
 
 def _gh_to_number(series: pd.Series) -> pd.Series:
-    # Pakai logic yang sama persis dengan to_number() (parsing format angka
-    # Indonesia yang benar: titik sebagai pemisah ribuan, koma sebagai
-    # desimal). Versi lama di sini cuma strip koma dan membiarkan titik apa
-    # adanya -- jadi angka seperti "878.775.500" gagal ke-parse (jadi NaN)
-    # karena pd.to_numeric menganggapnya desimal ganda yang tidak valid.
-    return to_number(series)
+    # PENTING: spreadsheet Green House ini formatnya BEDA dari spreadsheet
+    # utama (DATA POKOK) -- di sini angka pakai KOMA sebagai pemisah ribuan
+    # (gaya Inggris/Amerika, mis. "75,000,000"), BUKAN titik seperti sheet
+    # utama (mis. "75.000.000"). Sempat dicoba dipakaikan logic to_number()
+    # yang berasumsi format Indonesia (titik=ribuan, koma=desimal) -- hasilnya
+    # malah salah: "450,000" jadi hanya 450 (dianggap "450.000" desimal), dan
+    # angka dengan 2+ koma seperti "75,000,000"/"500,000,000" jadi gagal total
+    # (NaN) karena dianggap desimal ganda yang tidak valid. Makanya Kas Masuk/
+    # Kas Keluar/Biaya Berjalan Green House tetap 0 atau salah terus. Jadi di
+    # sini TETAP pakai strip-koma sederhana (bukan to_number()), sesuai format
+    # asli sheet ini.
+    if pd.api.types.is_numeric_dtype(series):
+        return series
+    def parse_val(x):
+        if pd.isna(x):
+            return np.nan
+        x = str(x).strip()
+        if x == "" or x.lower() in ("nan", "none", "-", "rp -", "rp-"):
+            return np.nan
+        x = x.replace("Rp", "").replace("rp", "").strip()
+        x = x.replace(",", "")
+        x = "".join(ch for ch in x if ch.isdigit() or ch in ".-")
+        if x in ("", "-", "."):
+            return np.nan
+        return x
+    return pd.to_numeric(series.map(parse_val), errors="coerce")
 
 @st.cache_data(ttl=300, show_spinner="Memuat Data Tanaman (Green House)...")
 def load_gh_tanaman() -> pd.DataFrame:
