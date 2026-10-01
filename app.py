@@ -1520,21 +1520,12 @@ def _gh_find_col(all_cols, candidates):
     return None
 
 def _gh_to_number(series: pd.Series) -> pd.Series:
-    if pd.api.types.is_numeric_dtype(series):
-        return series
-    def parse_val(x):
-        if pd.isna(x):
-            return np.nan
-        x = str(x).strip()
-        if x == "" or x.lower() in ("nan", "none", "-", "rp -", "rp-"):
-            return np.nan
-        x = x.replace("Rp", "").replace("rp", "").strip()
-        x = x.replace(",", "")
-        x = "".join(ch for ch in x if ch.isdigit() or ch in ".-")
-        if x in ("", "-", "."):
-            return np.nan
-        return x
-    return pd.to_numeric(series.map(parse_val), errors="coerce")
+    # Pakai logic yang sama persis dengan to_number() (parsing format angka
+    # Indonesia yang benar: titik sebagai pemisah ribuan, koma sebagai
+    # desimal). Versi lama di sini cuma strip koma dan membiarkan titik apa
+    # adanya -- jadi angka seperti "878.775.500" gagal ke-parse (jadi NaN)
+    # karena pd.to_numeric menganggapnya desimal ganda yang tidak valid.
+    return to_number(series)
 
 @st.cache_data(ttl=300, show_spinner="Memuat Data Tanaman (Green House)...")
 def load_gh_tanaman() -> pd.DataFrame:
@@ -1572,25 +1563,41 @@ def load_gh_kas() -> pd.DataFrame:
     if df is None or df.empty:
         return df
 
-    # Cari Kategori/Kas Masuk/Kas Keluar DULU (by nama) SEBELUM menyentuh kolom E
-    # by posisi -- supaya kalau kolom E ternyata sama dengan salah satu dari tiga
-    # ini, tidak ke-rename duluan jadi "_RAW_GH_BIAYA_BERJALAN_E" sebelum sempat
-    # ketemu (itu penyebab bug sebelumnya: kolom E collide dengan Kategori,
-    # groupby("Kategori") jadi KeyError karena kolomnya sudah kepakai nama lain).
     all_cols_raw = list(df.columns)
+
+    # TANGGAL = kolom A (index 0), diambil BY POSISI pakai .iloc langsung dari
+    # kolom mentah -- bukan dicari by nama header (beda dari _parse_tanggal()
+    # yang nyari header persis "TANGGAL"/"TGL"/"DATE"). Di-parse SEKARANG JUGA,
+    # sebelum drop_placeholder_cols sempat membuang kolom ini kalau headernya
+    # kosong, dan langsung disimpan sebagai "Tanggal_Lengkap" supaya filter
+    # tanggal di sidebar pasti kebaca dari kolom A apapun nama headernya.
+    if len(all_cols_raw) > 0:
+        df["Tanggal_Lengkap"] = pd.to_datetime(
+            _normalisasi_bulan_indo(df.iloc[:, 0]), dayfirst=True, errors="coerce"
+        )
+    else:
+        df["Tanggal_Lengkap"] = pd.NaT
+
+    # BIAYA BERJALAN = kolom E (index 4), diambil BY POSISI pakai .iloc dan
+    # DISALIN ke kolom baru SEKARANG JUGA -- sebelum nama kolom apapun di bawah
+    # sempat diubah/dibuang. Sengaja disalin (bukan di-rename) supaya kolom
+    # aslinya (dengan nama aslinya, apapun itu) tetap utuh dipakai logic
+    # Kategori/Kas Masuk/Kas Keluar di bawah. Ini yang menghindari bug
+    # sebelumnya: dulu kolom E di-rename duluan padahal posisinya kebetulan
+    # sama dengan kolom Kategori, jadi nama "Kategori" hilang total dan
+    # groupby("Kategori") KeyError -- lalu versi sesudahnya malah jadi kebalik,
+    # begitu ada collision kolom E sengaja TIDAK diambil sama sekali sehingga
+    # Biaya Berjalan selalu 0. Dengan disalin, tidak ada lagi collision untuk
+    # dihindari -- kolom E selalu terbaca apa adanya, dan Kategori/Kas Masuk/
+    # Kas Keluar tetap aman walau kebetulan di posisi yang sama.
+    if len(all_cols_raw) > 4:
+        df["_RAW_GH_BIAYA_BERJALAN_E"] = _gh_to_number(df.iloc[:, 4])
+    else:
+        df["_RAW_GH_BIAYA_BERJALAN_E"] = np.nan
+
     kategori_col = _gh_find_col(all_cols_raw, ["Kategori", "Kategori Kas"])
     masuk_col    = _gh_find_col(all_cols_raw, ["Kas Masuk", "Pemasukan", "Masuk"])
     keluar_col   = _gh_find_col(all_cols_raw, ["Kas Keluar", "Pengeluaran", "Keluar"])
-
-    # Kolom E (index 4) untuk "Biaya Berjalan" -- diambil by posisi dari kolom
-    # mentah SEBELUM drop_placeholder_cols (yang bisa membuang kolom tanpa header
-    # dan menggeser posisi), TAPI hanya kalau posisinya belum kepakai oleh salah
-    # satu dari Kategori/Kas Masuk/Kas Keluar di atas.
-    col_biaya_berjalan_e = all_cols_raw[4] if len(all_cols_raw) > 4 else None
-    if col_biaya_berjalan_e in (kategori_col, masuk_col, keluar_col):
-        col_biaya_berjalan_e = None
-    if col_biaya_berjalan_e:
-        df = df.rename(columns={col_biaya_berjalan_e: "_RAW_GH_BIAYA_BERJALAN_E"})
 
     df = drop_placeholder_cols(df)
 
@@ -1598,21 +1605,18 @@ def load_gh_kas() -> pd.DataFrame:
     for col, target in [
         (kategori_col, "Kategori"), (masuk_col, "Kas Masuk"), (keluar_col, "Kas Keluar"),
     ]:
-        if col and col != target:
+        if col and col != target and col in df.columns:
             rename_map[col] = target
     if rename_map:
         df = df.rename(columns=rename_map)
+    df = df.loc[:, ~df.columns.duplicated()]
 
     if "Kas Masuk" in df.columns:
         df["Kas Masuk"] = _gh_to_number(df["Kas Masuk"])
     if "Kas Keluar" in df.columns:
         df["Kas Keluar"] = _gh_to_number(df["Kas Keluar"])
-    if "_RAW_GH_BIAYA_BERJALAN_E" in df.columns:
-        df["_RAW_GH_BIAYA_BERJALAN_E"] = _gh_to_number(df["_RAW_GH_BIAYA_BERJALAN_E"])
     if "Kategori" in df.columns:
         df["Kategori"] = df["Kategori"].astype(str).str.strip()
-
-    df = _parse_tanggal(df)
 
     return df
 
@@ -4590,7 +4594,7 @@ with tab11:
         if "Tanggal_Lengkap" in df_gh_kas_display.columns:
             df_gh_kas_display = df_gh_kas_display.sort_values("Tanggal_Lengkap", ascending=False, na_position="last")
         st.dataframe(
-            format_money_table(df_gh_kas_display.drop(columns=["Tanggal_Lengkap"], errors="ignore"), extra_keywords=["KAS", "MASUK", "KELUAR"]),
+            format_money_table(df_gh_kas_display.drop(columns=["Tanggal_Lengkap", "_RAW_GH_BIAYA_BERJALAN_E"], errors="ignore"), extra_keywords=["KAS", "MASUK", "KELUAR"]),
             use_container_width=True, hide_index=True
         )
 
