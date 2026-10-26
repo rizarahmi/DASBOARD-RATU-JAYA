@@ -1854,8 +1854,8 @@ laba_tanaman = omzet_tanaman - biaya_berjalan_bulanan
 #   Omzet = Kas Masuk (kolom D), Biaya Berjalan = Kas Keluar (kolom E),
 #   Laba  = Kas Masuk - Kas Keluar (= Omzet - Biaya Berjalan).
 # Dihitung SEKALI di sini dan dipakai bersama oleh tab Summary dan tab Green House,
-# jadi Biaya Berjalan di kedua tempat itu pasti sama. Belum dimasukkan ke
-# total_omzet / total_laba di bawah.
+# jadi Biaya Berjalan di kedua tempat itu pasti sama. Omzet & Laba Green House
+# ikut dijumlahkan ke total_omzet / total_laba di bawah.
 omzet_gh = (
     df_gh_kas_periode["Kas Masuk"].sum()
     if not df_gh_kas_periode.empty and "Kas Masuk" in df_gh_kas_periode.columns
@@ -1868,8 +1868,10 @@ biaya_gh = (
 )
 laba_gh = omzet_gh - biaya_gh
 
-total_omzet = omzet_lapak + omzet_lapak_luar + omzet_ekspedisi + omzet_tanaman
-total_laba  = laba_lapak + laba_lapak_luar + laba_ekspedisi + laba_tanaman
+# Total di tab Summary = jumlah SEMUA yang tampil di Summary (Lapak, Lapak Luar,
+# Ekspedisi, Tanaman Panen, Green House).
+total_omzet = omzet_lapak + omzet_lapak_luar + omzet_ekspedisi + omzet_tanaman + omzet_gh
+total_laba  = laba_lapak + laba_lapak_luar + laba_ekspedisi + laba_tanaman + laba_gh
 
 # HEADER UTAMA
 st.title("📊 Dashboard Ratu Jaya")
@@ -1895,10 +1897,13 @@ tab1, tab2, tab2b, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab11, tab10 = st.t
 # TAB 1: SUMMARY
 with tab1:
     section_heading("🧮 Ringkasan Keseluruhan")
+    # Merah kalau total laba minus (sama seperti kartu Kas Green House & Net Income),
+    # karena Laba Green House bisa negatif dan menarik total ke bawah.
+    kelas_hero_total_laba = "hero-green" if total_laba >= 0 else "hero-red"
     st.markdown(
         '<div class="hero-row">'
         + hero_card("💰 Total Seluruh Omzet", rp(total_omzet), "hero-blue")
-        + hero_card("📈 Total Seluruh Laba",  rp(total_laba),  "hero-green")
+        + hero_card("📈 Total Seluruh Laba",  rp(total_laba),  kelas_hero_total_laba)
         + '</div>',
         unsafe_allow_html=True
     )
@@ -1948,11 +1953,18 @@ with tab1:
     pie_col1, pie_col2 = st.columns(2)
 
     with pie_col1:
+        _nama_omzet_pie = ["Lapak", "Lapak Luar", "Ekspedisi", "Tanaman Panen", "Green House"]
         fig_pie_omzet = px.pie(
-            names=["Lapak", "Lapak Luar", "Ekspedisi", "Tanaman Panen"],
-            values=[omzet_lapak, omzet_lapak_luar, omzet_ekspedisi, omzet_tanaman],
+            names=_nama_omzet_pie,
+            values=[omzet_lapak, omzet_lapak_luar, omzet_ekspedisi, omzet_tanaman, omzet_gh],
             title="Komposisi Omzet",
-            color_discrete_sequence=["#1f77b4", "#17becf", "#2ca02c", "#ff7f0e"],
+            # Warna dipatok per unit (bukan urutan), supaya tidak bergeser kalau ada
+            # unit yang nilainya 0 dan tidak tergambar.
+            color=_nama_omzet_pie,
+            color_discrete_map={
+                "Lapak": "#1f77b4", "Lapak Luar": "#17becf", "Ekspedisi": "#2ca02c",
+                "Tanaman Panen": "#ff7f0e", "Green House": "#bcbd22",
+            },
             hole=0.4
         )
         fig_pie_omzet.update_traces(
@@ -1963,11 +1975,26 @@ with tab1:
         st_plotly(fig_pie_omzet, use_container_width=True)
 
     with pie_col2:
+        _laba_unit_pie = [
+            ("Laba Lapak", laba_lapak), ("Laba Lapak Luar", laba_lapak_luar),
+            ("Laba Ekspedisi", laba_ekspedisi), ("Laba Tanaman Panen", laba_tanaman),
+            ("Laba Green House", laba_gh),
+        ]
+        # Pie tidak bisa menggambar nilai negatif, tapi Plotly tetap memasukkannya ke
+        # penyebut persen (mis. laba +85 jt dengan satu unit -70 jt jadi tampil 333%).
+        # Jadi unit dengan laba negatif dikeluarkan dari diagram dan disebutkan di
+        # keterangan di bawahnya. Total Seluruh Laba di atas tetap menghitung semuanya.
+        _laba_positif_pie = [(n, v) for n, v in _laba_unit_pie if v > 0]
+        _laba_negatif_pie = [(n, v) for n, v in _laba_unit_pie if v < 0]
         fig_pie_laba = px.pie(
-            names=["Laba Lapak", "Laba Lapak Luar", "Laba Ekspedisi", "Laba Tanaman Panen"],
-            values=[laba_lapak, laba_lapak_luar, laba_ekspedisi, laba_tanaman],
+            names=[n for n, _ in _laba_positif_pie],
+            values=[v for _, v in _laba_positif_pie],
             title="Komposisi Laba",
-            color_discrete_sequence=["#d62728", "#e377c2", "#9467bd", "#8c564b"],
+            color=[n for n, _ in _laba_positif_pie],
+            color_discrete_map={
+                "Laba Lapak": "#d62728", "Laba Lapak Luar": "#e377c2", "Laba Ekspedisi": "#9467bd",
+                "Laba Tanaman Panen": "#8c564b", "Laba Green House": "#7f7f7f",
+            },
             hole=0.4
         )
         fig_pie_laba.update_traces(
@@ -1976,6 +2003,12 @@ with tab1:
             textfont_size=14
         )
         st_plotly(fig_pie_laba, use_container_width=True)
+        if _laba_negatif_pie:
+            st.caption(
+                "Tidak tergambar di diagram karena laba negatif: "
+                + ", ".join(f"{n} ({rp(v)})" for n, v in _laba_negatif_pie)
+                + ". Total Seluruh Laba di atas sudah memperhitungkannya."
+            )
 
 # TAB 2: ANALISA LAPAK
 with tab2:
