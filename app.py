@@ -1897,13 +1897,12 @@ tab1, tab2, tab2b, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab11, tab10 = st.t
 # TAB 1: SUMMARY
 with tab1:
     section_heading("🧮 Ringkasan Keseluruhan")
-    # Merah kalau total laba minus (sama seperti kartu Kas Green House & Net Income),
-    # karena Laba Green House bisa negatif dan menarik total ke bawah.
-    kelas_hero_total_laba = "hero-green" if total_laba >= 0 else "hero-red"
+    # Total = jumlah polos semua unit (lihat total_omzet / total_laba di atas); tidak
+    # ada perlakuan khusus kalau hasilnya minus -- warna kartu tetap.
     st.markdown(
         '<div class="hero-row">'
         + hero_card("💰 Total Seluruh Omzet", rp(total_omzet), "hero-blue")
-        + hero_card("📈 Total Seluruh Laba",  rp(total_laba),  kelas_hero_total_laba)
+        + hero_card("📈 Total Seluruh Laba",  rp(total_laba),  "hero-green")
         + '</div>',
         unsafe_allow_html=True
     )
