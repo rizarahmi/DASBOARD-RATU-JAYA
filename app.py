@@ -1761,7 +1761,7 @@ df_piutang_filtered      = df_piutang_raw.copy()
 df_piutang_luar_filtered = df_piutang_luar_raw.copy()
 df_tanaman_sudah_filtered = df_tanaman_sudah.copy()
 df_biaya_bulanan         = df_biaya_bulanan_raw.copy()
-df_gh_kas_biaya          = df_gh_kas_raw.copy()
+df_gh_kas_periode        = df_gh_kas_raw.copy()
 
 if date_range and isinstance(date_range, tuple) and len(date_range) == 2:
     start_ts = pd.Timestamp(date_range[0])
@@ -1785,12 +1785,15 @@ if date_range and isinstance(date_range, tuple) and len(date_range) == 2:
         df_piutang_filtered = df_piutang_filtered[(df_piutang_filtered["Tanggal_Lengkap"] >= start_ts) & (df_piutang_filtered["Tanggal_Lengkap"] <= end_ts)]
     if not df_piutang_luar_filtered.empty and "Tanggal_Lengkap" in df_piutang_luar_filtered.columns:
         df_piutang_luar_filtered = df_piutang_luar_filtered[(df_piutang_luar_filtered["Tanggal_Lengkap"] >= start_ts) & (df_piutang_luar_filtered["Tanggal_Lengkap"] <= end_ts)]
-    if not df_gh_kas_biaya.empty and "Tanggal_Lengkap" in df_gh_kas_biaya.columns:
-        _mask_gh_kas = (
-            ((df_gh_kas_biaya["Tanggal_Lengkap"] >= start_ts) & (df_gh_kas_biaya["Tanggal_Lengkap"] <= end_ts))
-            | df_gh_kas_biaya["Tanggal_Lengkap"].isna()
-        )
-        df_gh_kas_biaya = df_gh_kas_biaya[_mask_gh_kas]
+    if not df_gh_kas_periode.empty and "Tanggal_Lengkap" in df_gh_kas_periode.columns:
+        # Filter KETAT (beda dari Ekspedisi): baris tanpa tanggal valid TIDAK ikut
+        # di periode manapun. Contohnya baris "Saldo awal" di sheet GREEN HOUSE KAS
+        # -- kolom tanggalnya berisi teks, bukan tanggal, jadi NaT. Kalau baris ini
+        # ikut lolos di setiap periode, Kas Masuk-nya (suntikan modal Rp 500 jt)
+        # akan menggelembungkan Omzet Green House di semua bulan.
+        df_gh_kas_periode = df_gh_kas_periode[
+            (df_gh_kas_periode["Tanggal_Lengkap"] >= start_ts) & (df_gh_kas_periode["Tanggal_Lengkap"] <= end_ts)
+        ]
     def _find_tgl_panen_col(cols):
         for c in cols:
             cu = c.strip().upper()
@@ -1847,6 +1850,24 @@ biaya_berjalan_bulanan = (
 )
 laba_tanaman = omzet_tanaman - biaya_berjalan_bulanan
 
+# Green House (sheet GREEN HOUSE KAS), ikut rentang tanggal sidebar:
+#   Omzet = Kas Masuk (kolom D), Biaya Berjalan = Kas Keluar (kolom E),
+#   Laba  = Kas Masuk - Kas Keluar (= Omzet - Biaya Berjalan).
+# Dihitung SEKALI di sini dan dipakai bersama oleh tab Summary dan tab Green House,
+# jadi Biaya Berjalan di kedua tempat itu pasti sama. Belum dimasukkan ke
+# total_omzet / total_laba di bawah.
+omzet_gh = (
+    df_gh_kas_periode["Kas Masuk"].sum()
+    if not df_gh_kas_periode.empty and "Kas Masuk" in df_gh_kas_periode.columns
+    else 0
+)
+biaya_gh = (
+    df_gh_kas_periode["_RAW_GH_BIAYA_BERJALAN_E"].sum()
+    if not df_gh_kas_periode.empty and "_RAW_GH_BIAYA_BERJALAN_E" in df_gh_kas_periode.columns
+    else 0
+)
+laba_gh = omzet_gh - biaya_gh
+
 total_omzet = omzet_lapak + omzet_lapak_luar + omzet_ekspedisi + omzet_tanaman
 total_laba  = laba_lapak + laba_lapak_luar + laba_ekspedisi + laba_tanaman
 
@@ -1857,7 +1878,7 @@ st.divider()
 
 # TABS
 tab1, tab2, tab2b, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab11, tab10 = st.tabs([
-    "💰 Pendapatan",
+    "💰 Summary",
     "🏪 Analisa Lapak",
     "🏬 Analisa Lapak Luar",
     "🌱 Tanaman",
@@ -1871,7 +1892,7 @@ tab1, tab2, tab2b, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab11, tab10 = st.t
     "💼 Keuangan",
 ])
 
-# TAB 1: PENDAPATAN
+# TAB 1: SUMMARY
 with tab1:
     section_heading("🧮 Ringkasan Keseluruhan")
     st.markdown(
@@ -1912,6 +1933,15 @@ with tab1:
         tp3.metric("Laba Tanaman Panen",     rp(laba_tanaman))
         if not _omzet_col_tp:
             st.caption("⚠️ Kolom Omzet tidak ditemukan di sheet 'TANAMAN PANEN'.")
+
+    with st.container(border=True):
+        st.markdown('<div class="income-card-title">🌿 Pendapatan Green House</div>', unsafe_allow_html=True)
+        gh1, gh2, gh3 = st.columns(3)
+        gh1.metric("Omzet Green House",        rp(omzet_gh))
+        gh2.metric("Biaya Berjalan Green House", rp(biaya_gh))
+        gh3.metric("Laba Green House",         rp(laba_gh))
+        if df_gh_kas_raw.empty or "Kas Masuk" not in df_gh_kas_raw.columns:
+            st.caption("⚠️ Data Kas Masuk tidak ditemukan di sheet 'GREEN HOUSE KAS'.")
 
     st.divider()
     section_heading("📊 Komposisi Omzet & Laba Keseluruhan")
@@ -4562,14 +4592,10 @@ with tab10:
 with tab11:
     st.markdown("### 🌿 Green House")
 
-    # Biaya Berjalan = SUM kolom E sheet GREEN HOUSE KAS, difilter tanggal
-    # (kolom A) -- df_gh_kas_biaya sudah difilter ke rentang tanggal sidebar
-    # (default bulan berjalan) di bagian atas file, jadi tinggal dijumlah saja.
-    total_biaya_berjalan_gh = (
-        df_gh_kas_biaya["_RAW_GH_BIAYA_BERJALAN_E"].sum()
-        if not df_gh_kas_biaya.empty and "_RAW_GH_BIAYA_BERJALAN_E" in df_gh_kas_biaya.columns
-        else 0
-    )
+    # Biaya Berjalan = SUM kolom E (Kas Keluar) sheet GREEN HOUSE KAS, difilter
+    # tanggal (kolom A) ikut sidebar. Sudah dihitung di bagian KALKULASI UTAMA
+    # (biaya_gh) dan dipakai juga di tab Summary, jadi angkanya pasti sama.
+    total_biaya_berjalan_gh = biaya_gh
 
     kas_masuk_gh_total  = df_gh_kas_raw["Kas Masuk"].sum()  if not df_gh_kas_raw.empty and "Kas Masuk"  in df_gh_kas_raw.columns else 0
     kas_keluar_gh_total = df_gh_kas_raw["Kas Keluar"].sum() if not df_gh_kas_raw.empty and "Kas Keluar" in df_gh_kas_raw.columns else 0
