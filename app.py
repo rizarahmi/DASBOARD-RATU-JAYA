@@ -1196,13 +1196,29 @@ def load_tanaman_pengeluaran() -> pd.DataFrame:
             .str.replace(r"\s+", " ", regex=True).str.strip()
         )
 
+    def _kosong(teks):
+        # Sel kosong atau cuma tanda strip ("-", "Rp -") dianggap tidak ada nominal.
+        return teks.str.lower().isin(["", "-", "rp -", "rp-", "nan", "none"])
+
+    def _angka(teks):
+        # Pembaca angka khusus sheet ini. to_number() menganggap koma sebagai
+        # desimal ala Indonesia, jadi "8,200,000" (gaya US) gagal dibaca, dan
+        # "50.000,-" juga gagal karena ada ",-" di belakangnya.
+        s = teks.str.replace(r",-+$", "", regex=True)
+        tanpa_rp = s.str.replace(r"(?i)rp\.?", "", regex=True).str.replace(" ", "", regex=False)
+        gaya_us = tanpa_rp.str.fullmatch(r"-?\d{1,3}(,\d{3})+")
+        s = s.where(~gaya_us, tanpa_rp.str.replace(",", "", regex=False))
+        return to_number(s)
+
     out = pd.DataFrame({
-        "Tanggal_Teks": _teks(0),
-        "Musiman":      _teks(1),
-        "Keterangan":   _teks(2),
-        "Pendapatan":   to_number(_kolom(3)),
-        "Pengeluaran":  to_number(_kolom(4)),
+        "Tanggal_Teks":     _teks(0),
+        "Musiman":          _teks(1),
+        "Keterangan":       _teks(2),
+        "Pendapatan_Teks":  _teks(3),
+        "Pengeluaran_Teks": _teks(4),
     })
+    out["Pendapatan"]  = _angka(out["Pendapatan_Teks"])
+    out["Pengeluaran"] = _angka(out["Pengeluaran_Teks"])
 
     # Tanggal dari kolom A -- Mei/Agu/Okt/Des diterjemahkan dulu supaya terbaca.
     tgl_norm = _normalisasi_bulan_indo(_kolom(0))
@@ -1216,13 +1232,29 @@ def load_tanaman_pengeluaran() -> pd.DataFrame:
         tanggal.loc[gagal] = [
             pd.to_datetime(v, dayfirst=True, errors="coerce") for v in tgl_norm[gagal]
         ]
-    out["Tanggal_Lengkap"] = tanggal
+    # normalize(): kalau ada sel tanggal yang menyertakan jam, jam dibuang supaya
+    # baris di hari terakhir rentang sidebar tidak lolos dari filter "<= tanggal akhir".
+    out["Tanggal_Lengkap"] = tanggal.dt.normalize()
+
+    # Tandai baris yang nominalnya patut dicurigai. Google Sheets kadang tidak
+    # mengirim sel yang tipenya beda dari mayoritas sel di kolomnya (mis. angka
+    # yang tersimpan sebagai teks), sehingga nominalnya tampil kosong dan
+    # diam-diam tidak terhitung. Baris-baris ini ditampilkan di tab Pengeluaran.
+    ada_isi_baris = (out["Tanggal_Teks"] != "") & ((out["Keterangan"] != "") | (out["Musiman"] != ""))
+    m_e = ~_kosong(out["Pengeluaran_Teks"]) & out["Pengeluaran"].isna()
+    m_d = ~_kosong(out["Pendapatan_Teks"]) & out["Pendapatan"].isna()
+    m_k = ada_isi_baris & _kosong(out["Pendapatan_Teks"]) & _kosong(out["Pengeluaran_Teks"])
+    out["Masalah"] = np.select(
+        [m_e, m_d, m_k],
+        ["Isi kolom E (pengeluaran) bukan angka", "Isi kolom D (pendapatan) bukan angka", "Kolom D dan E kosong"],
+        default="",
+    )
 
     # Buang baris yang kelima kolom ini kosong semua (mis. baris sisa di bawah)
     # dan baris judul kalau sampai ikut terbaca sebagai data.
     kosong = (
         (out["Tanggal_Teks"] == "") & (out["Musiman"] == "") & (out["Keterangan"] == "")
-        & out["Pendapatan"].isna() & out["Pengeluaran"].isna()
+        & _kosong(out["Pendapatan_Teks"]) & _kosong(out["Pengeluaran_Teks"])
     )
     baris_judul = (
         out["Tanggal_Teks"].str.upper().isin(["TANGGAL", "TGL"])
@@ -3521,7 +3553,7 @@ with tab3:
     m3.metric("🌾 Cok RUT per KG",       f"Rp {HARGA_COK_RUT:,}/KG")
 
     st.divider()
-    tanaman_tab1, tanaman_tab_peng, tanaman_tab2 = st.tabs(["🌾 Belum Panen", "💸 Pengeluaran", "✅ Sudah Panen"])
+    tanaman_tab_peng, tanaman_tab1, tanaman_tab2 = st.tabs(["💸 Pengeluaran", "🌾 Belum Panen", "✅ Sudah Panen"])
 
     with tanaman_tab1:
         if not df_tanaman_belum.empty:
@@ -3564,6 +3596,10 @@ with tab3:
         if df_tan_peng_raw.empty:
             st.info("Data sheet 'TANAMAN' kosong atau tidak ditemukan.")
         else:
+            def _tgl_peng_tampil(d):
+                # Tanggal terbaca -> dd/mm/yyyy; kalau tidak terbaca, tampilkan teks aslinya.
+                return d["Tanggal_Lengkap"].dt.strftime("%d/%m/%Y").where(d["Tanggal_Lengkap"].notna(), d["Tanggal_Teks"])
+
             # TOTAL PENGELUARAN BERJALAN -- ikut filter tanggal sidebar (tanggal di
             # kolom A), menjumlahkan kolom PENGELUARAN (kolom E) dari SEMUA musiman.
             # df_tan_peng_periode sudah difilter ketat di APLIKASI FILTER TANGGAL;
@@ -3589,6 +3625,37 @@ with tab3:
                     f"⚠️ {n_tanpa_tgl_peng} baris tidak punya tanggal yang terbaca di kolom A sheet TANAMAN, "
                     "jadi tidak ikut dihitung di total (tetap tampil di tabel)."
                 )
+
+            # Pembanding: jumlah SELURUH baris bertanggal di sheet, tanpa filter apa pun.
+            _peng_bertgl = df_tan_peng_raw[df_tan_peng_raw["Tanggal_Lengkap"].notna()]
+            total_peng_semua = _peng_bertgl["Pengeluaran"].sum()
+            jml_tx_semua = int((_peng_bertgl["Pengeluaran"].fillna(0) != 0).sum())
+            st.caption(
+                f"🗂️ Seluruh sheet TANAMAN (semua tanggal & musiman): {rp(total_peng_semua)} · "
+                f"{jml_tx_semua} transaksi pengeluaran"
+            )
+
+            df_cek_peng = df_tan_peng_raw[df_tan_peng_raw["Masalah"] != ""].sort_values(
+                "Tanggal_Lengkap", ascending=False, na_position="last", kind="stable"
+            )
+            if not df_cek_peng.empty:
+                with st.expander(f"⚠️ {len(df_cek_peng)} baris perlu dicek: nominalnya kosong atau bukan angka"):
+                    st.caption(
+                        "Baris di bawah ini tidak ikut terhitung di total karena kolom D/E-nya kosong atau "
+                        "isinya tidak bisa dibaca sebagai angka. Kalau di sheet TANAMAN nominalnya ada, biasanya "
+                        "sel itu tersimpan sebagai teks: ubah format selnya ke Angka lalu ketik ulang nominalnya."
+                    )
+                    st.dataframe(
+                        pd.DataFrame({
+                            "Tanggal":     _tgl_peng_tampil(df_cek_peng),
+                            "Musiman":     df_cek_peng["Musiman"],
+                            "Keterangan":  df_cek_peng["Keterangan"],
+                            "Isi kolom D": df_cek_peng["Pendapatan_Teks"],
+                            "Isi kolom E": df_cek_peng["Pengeluaran_Teks"],
+                            "Masalah":     df_cek_peng["Masalah"],
+                        }),
+                        use_container_width=True, hide_index=True,
+                    )
 
             st.divider()
             st.markdown("#### 📋 Rincian Pengeluaran")
@@ -3619,9 +3686,8 @@ with tab3:
                 df_peng_tbl = df_peng_tbl.sort_values(
                     "Tanggal_Lengkap", ascending=False, na_position="last", kind="stable"
                 )
-                tgl_tampil = df_peng_tbl["Tanggal_Lengkap"].dt.strftime("%d/%m/%Y")
                 df_peng_tampil = pd.DataFrame({
-                    "Tanggal":     tgl_tampil.where(df_peng_tbl["Tanggal_Lengkap"].notna(), df_peng_tbl["Tanggal_Teks"]),
+                    "Tanggal":     _tgl_peng_tampil(df_peng_tbl),
                     "Musiman":     df_peng_tbl["Musiman"],
                     "Keterangan":  df_peng_tbl["Keterangan"],
                     "Pendapatan":  df_peng_tbl["Pendapatan"].map(rp),
@@ -3634,6 +3700,42 @@ with tab3:
                     f"📌 {len(df_peng_tampil)} baris · Total Pengeluaran baris di tabel ini "
                     f"(semua tanggal): {rp(total_peng_tabel)}"
                 )
+
+            # Alat cek: hitungan per bulan untuk SELURUH sheet, supaya angka dashboard
+            # gampang dicocokkan dengan hitungan manual di Google Sheets.
+            with st.expander("🔎 Cek hitungan per bulan (seluruh sheet)"):
+                _bertgl = df_tan_peng_raw[df_tan_peng_raw["Tanggal_Lengkap"].notna()].copy()
+                if _bertgl.empty:
+                    st.info("Belum ada baris dengan tanggal yang terbaca.")
+                else:
+                    _bertgl["_ym"] = _bertgl["Tanggal_Lengkap"].dt.year * 100 + _bertgl["Tanggal_Lengkap"].dt.month
+                    _bertgl["_tx"] = (_bertgl["Pengeluaran"].fillna(0) != 0).astype(int)
+                    rekap_bln_peng = (
+                        _bertgl.groupby("_ym", as_index=False)
+                        .agg(Transaksi=("_tx", "sum"), Pengeluaran=("Pengeluaran", "sum"), Pendapatan=("Pendapatan", "sum"))
+                        .sort_values("_ym")
+                    )
+                    _nama_bln_peng = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"]
+                    tabel_bln_peng = pd.DataFrame({
+                        "Bulan":       [f"{_nama_bln_peng[int(v) % 100 - 1]} {int(v) // 100}" for v in rekap_bln_peng["_ym"]],
+                        "Transaksi":   rekap_bln_peng["Transaksi"].astype(int).tolist(),
+                        "Pengeluaran": rekap_bln_peng["Pengeluaran"].map(rp).tolist(),
+                        "Pendapatan":  rekap_bln_peng["Pendapatan"].map(rp).tolist(),
+                    })
+                    baris_total_bln = pd.DataFrame([{
+                        "Bulan": "TOTAL",
+                        "Transaksi": int(rekap_bln_peng["Transaksi"].sum()),
+                        "Pengeluaran": rp(rekap_bln_peng["Pengeluaran"].sum()),
+                        "Pendapatan": rp(rekap_bln_peng["Pendapatan"].sum()),
+                    }])
+                    st.dataframe(
+                        pd.concat([tabel_bln_peng, baris_total_bln], ignore_index=True),
+                        use_container_width=True, hide_index=True,
+                    )
+                    st.caption(
+                        "Transaksi = jumlah baris yang kolom PENGELUARAN-nya terisi (bukan nol). "
+                        "Baris tanpa tanggal yang terbaca tidak masuk hitungan ini."
+                    )
 
     with tanaman_tab2:
         if not df_tanaman_sudah.empty:
