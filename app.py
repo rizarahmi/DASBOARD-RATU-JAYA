@@ -417,6 +417,19 @@ def _normalisasi_bulan_indo(series: pd.Series) -> pd.Series:
         s = s.str.replace(rf"(?i)\b{indo}\b", eng, regex=True)
     return s
 
+def _parse_tanggal_aman(series: pd.Series) -> pd.Series:
+    # Versi pd.to_datetime() yang tahan format campuran. pandas menebak SATU
+    # format dari baris pertama lalu memaksakannya ke semua baris: kalau di
+    # kolom yang sama ada "4-Jun-2026" dan "3-Sep-26" (tahun 4 digit vs 2
+    # digit), salah satunya jadi NaT dan baris itu hilang dari sorting/total.
+    # Baris yang gagal (tapi ada angkanya) dicoba lagi satu per satu.
+    teks = _normalisasi_bulan_indo(series)
+    hasil = pd.to_datetime(teks, dayfirst=True, errors="coerce")
+    gagal = hasil.isna() & teks.str.contains(r"\d", regex=True)
+    if gagal.any():
+        hasil.loc[gagal] = [pd.to_datetime(v, dayfirst=True, errors="coerce") for v in teks[gagal]]
+    return hasil
+
 def _parse_tanggal(df: pd.DataFrame) -> pd.DataFrame:
     cols = list(df.columns)
     if all(c in cols for c in ["Tanggal", "Bulan", "Tahun"]):
@@ -1220,21 +1233,11 @@ def load_tanaman_pengeluaran() -> pd.DataFrame:
     out["Pendapatan"]  = _angka(out["Pendapatan_Teks"])
     out["Pengeluaran"] = _angka(out["Pengeluaran_Teks"])
 
-    # Tanggal dari kolom A -- Mei/Agu/Okt/Des diterjemahkan dulu supaya terbaca.
-    tgl_norm = _normalisasi_bulan_indo(_kolom(0))
-    tanggal = pd.to_datetime(tgl_norm, dayfirst=True, errors="coerce")
-    # pandas menebak SATU format dari baris pertama lalu memaksakannya ke semua
-    # baris. Kalau di sheet ada format lain (mis. "11-Agu-26" di antara
-    # "11-Agu-2026"), baris itu jadi NaT dan hilang dari total periode. Baris
-    # yang gagal (tapi ada angkanya) dicoba lagi satu per satu.
-    gagal = tanggal.isna() & out["Tanggal_Teks"].str.contains(r"\d", regex=True)
-    if gagal.any():
-        tanggal.loc[gagal] = [
-            pd.to_datetime(v, dayfirst=True, errors="coerce") for v in tgl_norm[gagal]
-        ]
+    # Tanggal dari kolom A -- Mei/Agu/Okt/Des diterjemahkan dulu supaya terbaca,
+    # dan format campuran (tahun 2 digit vs 4 digit) tetap terbaca.
     # normalize(): kalau ada sel tanggal yang menyertakan jam, jam dibuang supaya
     # baris di hari terakhir rentang sidebar tidak lolos dari filter "<= tanggal akhir".
-    out["Tanggal_Lengkap"] = tanggal.dt.normalize()
+    out["Tanggal_Lengkap"] = _parse_tanggal_aman(_kolom(0)).dt.normalize()
 
     # Tandai baris yang nominalnya patut dicurigai. Google Sheets kadang tidak
     # mengirim sel yang tipenya beda dari mayoritas sel di kolomnya (mis. angka
@@ -1261,48 +1264,6 @@ def load_tanaman_pengeluaran() -> pd.DataFrame:
         & (out["Musiman"].str.upper() == "MUSIMAN")
     )
     return out[~(kosong | baris_judul)].reset_index(drop=True)
-
-_BULAN_ID_MAP = {
-    "januari": 1, "februari": 2, "maret": 3, "april": 4, "mei": 5, "juni": 6,
-    "juli": 7, "agustus": 8, "september": 9, "oktober": 10, "november": 11, "desember": 12,
-    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "jun": 6, "jul": 7,
-    "agt": 8, "agu": 8, "aug": 8, "sep": 9, "sept": 9, "okt": 10, "oct": 10,
-    "nov": 11, "des": 12, "dec": 12,
-}
-
-def _parse_bulan_number(x):
-    if pd.isna(x):
-        return np.nan
-    s = str(x).strip()
-    if s == "":
-        return np.nan
-    low = s.lower()
-    if low in _BULAN_ID_MAP:
-        return _BULAN_ID_MAP[low]
-    for token in low.replace("-", " ").replace("/", " ").replace(",", " ").split():
-        if token in _BULAN_ID_MAP:
-            return _BULAN_ID_MAP[token]
-    if s.isdigit():
-        n = int(s)
-        if 1 <= n <= 12:
-            return n
-    dt = pd.to_datetime(s, dayfirst=True, errors="coerce")
-    if pd.notna(dt):
-        return dt.month
-    return np.nan
-
-@st.cache_data(ttl=300, show_spinner="Memuat Biaya Berjalan Bulanan...")
-def load_biaya_berjalan_bulanan() -> pd.DataFrame:
-    df = fetch_raw_csv(SHEET_TANAMAN_BELUM)
-    if df.empty or len(df.columns) <= 15:
-        return pd.DataFrame()
-    all_cols = list(df.columns)
-    out = df[[all_cols[14], all_cols[15]]].copy()
-    out.columns = ["BULAN", "BIAYA BERJALAN"]
-    out["BIAYA BERJALAN"] = to_number(out["BIAYA BERJALAN"])
-    out = out[out["BULAN"].apply(is_filled) & out["BIAYA BERJALAN"].notna()].reset_index(drop=True)
-    out["Bulan_Num"] = out["BULAN"].apply(_parse_bulan_number)
-    return out
 
 @st.cache_data(ttl=300, show_spinner="Memuat Stok Lapak...")
 def load_stok_lapak() -> pd.DataFrame:
@@ -1741,7 +1702,6 @@ try:
     df_ekspedisi_raw      = load_ekspedisi()
     df_tanaman_belum      = load_tanaman_belum_panen()
     df_tanaman_sudah      = load_tanaman_sudah_panen()
-    df_biaya_bulanan_raw  = load_biaya_berjalan_bulanan()
     df_kerugian_gudang_raw = load_kerugian_gudang()
     df_hutang_pake_tani_raw = load_hutang_pake_tani()
 except Exception as e:
@@ -1855,7 +1815,6 @@ df_ekspedisi             = df_ekspedisi_raw.copy()
 df_piutang_filtered      = df_piutang_raw.copy()
 df_piutang_luar_filtered = df_piutang_luar_raw.copy()
 df_tanaman_sudah_filtered = df_tanaman_sudah.copy()
-df_biaya_bulanan         = df_biaya_bulanan_raw.copy()
 df_gh_kas_periode        = df_gh_kas_raw.copy()
 df_tan_peng_periode      = df_tan_peng_raw.copy()
 
@@ -1918,12 +1877,6 @@ if date_range and isinstance(date_range, tuple) and len(date_range) == 2:
             (df_tanaman_sudah_filtered["_tgl_parsed"] <= end_ts)
         ].drop(columns=["_tgl_parsed"])
 
-    if not df_biaya_bulanan.empty and "Bulan_Num" in df_biaya_bulanan.columns:
-        _bulan_periods = pd.period_range(start=start_ts, end=end_ts, freq="M")
-        _bulan_terpilih = set(p.month for p in _bulan_periods)
-        _mask_bb = df_biaya_bulanan["Bulan_Num"].isin(_bulan_terpilih) | df_biaya_bulanan["Bulan_Num"].isna()
-        df_biaya_bulanan = df_biaya_bulanan[_mask_bb]
-
 # KALKULASI UTAMA
 omzet_lapak   = df_penjualan["Total harga"].sum() if not df_penjualan.empty and "Total harga" in df_penjualan.columns else 0
 laba_lapak    = df_penjualan["Keuntungan"].sum()  if not df_penjualan.empty and "Keuntungan"  in df_penjualan.columns else 0
@@ -1946,9 +1899,14 @@ _omzet_col_tp = _find_col_tanaman(df_tanaman_sudah_filtered, ["omzet", "total ha
 
 omzet_tanaman = to_number(df_tanaman_sudah_filtered[_omzet_col_tp]).sum() if _omzet_col_tp else 0
 
+# Biaya Berjalan Bulanan (Tanaman) = Total Pengeluaran Berjalan di tab Tanaman >
+# Pengeluaran: jumlah kolom E (PENGELUARAN) sheet TANAMAN untuk baris yang tanggalnya
+# (kolom A) ada di rentang tanggal sidebar, semua musiman. Dihitung SEKALI di sini dan
+# dipakai bersama oleh tab Summary dan tab Tanaman, jadi angkanya pasti sama. Baris
+# tanpa tanggal yang terbaca sengaja tidak ikut dihitung.
 biaya_berjalan_bulanan = (
-    df_biaya_bulanan["BIAYA BERJALAN"].sum()
-    if not df_biaya_bulanan.empty and "BIAYA BERJALAN" in df_biaya_bulanan.columns
+    df_tan_peng_periode.loc[df_tan_peng_periode["Tanggal_Lengkap"].notna(), "Pengeluaran"].sum()
+    if not df_tan_peng_periode.empty and {"Tanggal_Lengkap", "Pengeluaran"} <= set(df_tan_peng_periode.columns)
     else 0
 )
 laba_tanaman = omzet_tanaman - biaya_berjalan_bulanan
@@ -3602,23 +3560,16 @@ with tab3:
 
             # TOTAL PENGELUARAN BERJALAN -- ikut filter tanggal sidebar (tanggal di
             # kolom A), menjumlahkan kolom PENGELUARAN (kolom E) dari SEMUA musiman.
-            # df_tan_peng_periode sudah difilter ketat di APLIKASI FILTER TANGGAL;
-            # baris tanpa tanggal valid sengaja tidak ikut dihitung.
-            _peng_periode = df_tan_peng_periode[df_tan_peng_periode["Tanggal_Lengkap"].notna()]
-            total_peng_tanaman = _peng_periode["Pengeluaran"].sum()
-            jml_tx_peng = int((_peng_periode["Pengeluaran"].fillna(0) != 0).sum())
-
-            if date_range and isinstance(date_range, tuple) and len(date_range) == 2:
-                label_periode_peng = f"{date_range[0].strftime('%d/%m/%Y')} – {date_range[1].strftime('%d/%m/%Y')}"
-            else:
-                label_periode_peng = "semua tanggal"
+            # Angkanya dihitung SEKALI di KALKULASI UTAMA (biaya_berjalan_bulanan) dan
+            # dipakai bersama oleh tab Summary, jadi keduanya pasti sama; baris tanpa
+            # tanggal valid sengaja tidak ikut dihitung.
+            total_peng_tanaman = biaya_berjalan_bulanan
 
             st.columns(3)[0].metric(
                 "💸 Total Pengeluaran Berjalan", rp(total_peng_tanaman),
                 help="Jumlah kolom PENGELUARAN sheet TANAMAN untuk baris yang tanggalnya (kolom A) "
                      "ada di rentang tanggal sidebar. Semua musiman ikut dihitung.",
             )
-            st.caption(f"📅 Periode sidebar: {label_periode_peng} · {jml_tx_peng} transaksi pengeluaran · semua musiman")
             n_tanpa_tgl_peng = int(df_tan_peng_raw["Tanggal_Lengkap"].isna().sum())
             if n_tanpa_tgl_peng:
                 st.caption(
@@ -3626,16 +3577,7 @@ with tab3:
                     "jadi tidak ikut dihitung di total (tetap tampil di tabel)."
                 )
 
-            # Pembanding: jumlah SELURUH baris bertanggal di sheet, tanpa filter apa pun.
-            _peng_bertgl = df_tan_peng_raw[df_tan_peng_raw["Tanggal_Lengkap"].notna()]
-            total_peng_semua = _peng_bertgl["Pengeluaran"].sum()
-            jml_tx_semua = int((_peng_bertgl["Pengeluaran"].fillna(0) != 0).sum())
-            st.caption(
-                f"🗂️ Seluruh sheet TANAMAN (semua tanggal & musiman): {rp(total_peng_semua)} · "
-                f"{jml_tx_semua} transaksi pengeluaran"
-            )
-
-            df_cek_peng = df_tan_peng_raw[df_tan_peng_raw["Masalah"] != ""].sort_values(
+            df_cek_peng =df_tan_peng_raw[df_tan_peng_raw["Masalah"] != ""].sort_values(
                 "Tanggal_Lengkap", ascending=False, na_position="last", kind="stable"
             )
             if not df_cek_peng.empty:
@@ -3818,7 +3760,17 @@ with tab3:
             else:
                 panen_s3.info("Kolom Luas (Ha) tidak ditemukan")
 
-            st.dataframe(format_money_table(df_tanaman_sudah), use_container_width=True, hide_index=True)
+            # Tabel detail: panen paling baru ditaruh paling atas. Baris yang tanggal
+            # panennya tidak terbaca ditaruh paling bawah.
+            df_tampil_sudah = df_tanaman_sudah
+            if tgl_col_periode:
+                df_tampil_sudah = (
+                    df_tanaman_sudah
+                    .assign(_tgl_urut=_parse_tanggal_aman(df_tanaman_sudah[tgl_col_periode]))
+                    .sort_values("_tgl_urut", ascending=False, na_position="last", kind="stable")
+                    .drop(columns=["_tgl_urut"])
+                )
+            st.dataframe(format_money_table(df_tampil_sudah), use_container_width=True, hide_index=True)
         else:
             st.info("Data sheet 'TANAMAN PANEN' kosong atau tidak ditemukan.")
 
