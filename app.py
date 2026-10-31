@@ -2128,7 +2128,7 @@ with tab2:
                 )
 
             # ---------- Tabel HIJAU: rekap level Gudang ----------
-            df_green_rpi = pd.DataFrame(columns=["JENIS", "GRADE", "Total Grading", "Tonase Lahan", "Stok Gudang", "Terjual Gudang", "Pendapatan Gudang", "Laba Gudang"])
+            df_green_rpi = pd.DataFrame(columns=["JENIS", "GRADE", "Total Grading", "Tonase Lahan", "Stok Gudang", "Terjual Gudang", "Terbuang Gudang", "Pendapatan Gudang", "Laba Gudang"])
             if "JENIS" in df_bm.columns and "GRADE" in df_bm.columns:
                 df_bm_valid_rpi = df_bm[df_bm["JENIS"].apply(is_filled) & df_bm["GRADE"].apply(is_filled)]
                 if not df_bm_valid_rpi.empty:
@@ -2167,7 +2167,19 @@ with tab2:
                     df_pj_gudang_grp_rpi = df_pj_gudang_rpi.groupby(["JENIS", "GRADE"], as_index=False).agg(**agg_pj_gudang_rpi)
                     df_green_rpi = df_green_rpi.merge(df_pj_gudang_grp_rpi, on=["JENIS", "GRADE"], how="left")
 
-            for _c in ["Total Grading", "Tonase Lahan", "Stok Gudang", "Terjual Gudang", "Pendapatan Gudang", "Laba Gudang"]:
+                # Terbuang Gudang: baris PENJUALAN yang sama (Kode Lapak = kode Gudang
+                # invoice ini + Invoice terpilih), tapi HANYA yang keterangannya (kolom X)
+                # = "BS BUANG" (Is_Dibuang), per Jenis + Grade. Dijumlahkan dengan
+                # Tonnase Terbuang Lapak (tabel PINK) jadi Total Tonnase Terbuang.
+                if "Is_Dibuang" in df_pj_gudang_rpi.columns and "Jumlah (KG)" in df_pj_gudang_rpi.columns:
+                    df_pj_gudang_buang_rpi = df_pj_gudang_rpi[df_pj_gudang_rpi["Is_Dibuang"] == True]
+                    if not df_pj_gudang_buang_rpi.empty:
+                        df_pj_gudang_buang_grp_rpi = df_pj_gudang_buang_rpi.groupby(["JENIS", "GRADE"], as_index=False).agg(
+                            **{"Terbuang Gudang": ("Jumlah (KG)", "sum")}
+                        )
+                        df_green_rpi = df_green_rpi.merge(df_pj_gudang_buang_grp_rpi, on=["JENIS", "GRADE"], how="left")
+
+            for _c in ["Total Grading", "Tonase Lahan", "Stok Gudang", "Terjual Gudang", "Terbuang Gudang", "Pendapatan Gudang", "Laba Gudang"]:
                 if _c not in df_green_rpi.columns:
                     df_green_rpi[_c] = 0.0
                 df_green_rpi[_c] = to_number(df_green_rpi[_c]).fillna(0)
@@ -2260,7 +2272,11 @@ with tab2:
             total_laba_rpi = total_laba_gudang_rpi + total_laba_lapak_rpi
 
             total_moving_rpi = float(df_pink_rpi["JUMLAH MOVING"].sum()) if not df_pink_rpi.empty and "JUMLAH MOVING" in df_pink_rpi.columns else 0.0
-            total_tonnase_buang_rpi = float(df_pink_rpi["Tonnase Terbuang"].sum()) if not df_pink_rpi.empty and "Tonnase Terbuang" in df_pink_rpi.columns else 0.0
+            # Total Tonnase Terbuang = terbuang di Gudang (tabel HIJAU) + terbuang di
+            # Lapak (tabel PINK), sama seperti Total Pendapatan & Total Laba di atas.
+            total_tonnase_buang_lapak_rpi = float(df_pink_rpi["Tonnase Terbuang"].sum()) if not df_pink_rpi.empty and "Tonnase Terbuang" in df_pink_rpi.columns else 0.0
+            total_tonnase_buang_gudang_rpi = float(df_green_rpi["Terbuang Gudang"].sum()) if not df_green_rpi.empty and "Terbuang Gudang" in df_green_rpi.columns else 0.0
+            total_tonnase_buang_rpi = total_tonnase_buang_gudang_rpi + total_tonnase_buang_lapak_rpi
 
             st.write("")
             agg_cols_rpi = st.columns(5)
@@ -2293,6 +2309,7 @@ with tab2:
                         f"<td class=\"rpi-num\">{r['Tonase Lahan']:,.1f}</td>"
                         f"<td class=\"rpi-num\">{r['Stok Gudang']:,.1f}</td>"
                         f"<td class=\"rpi-num\">{r['Terjual Gudang']:,.1f}</td>"
+                        f"<td class=\"rpi-num\">{r['Terbuang Gudang']:,.1f}</td>"
                         f"<td class=\"rpi-num\">{_esc_rpi(rp(r['Pendapatan Gudang']))}</td>"
                         f"<td class=\"rpi-num\">{_esc_rpi(rp(r['Laba Gudang']))}</td>"
                         "</tr>"
@@ -2306,10 +2323,11 @@ with tab2:
                     f'<td class="rpi-num">{df_green_rpi["Tonase Lahan"].sum():,.1f}</td>'
                     f'<td class="rpi-num">{df_green_rpi["Stok Gudang"].sum():,.1f}</td>'
                     f'<td class="rpi-num">{df_green_rpi["Terjual Gudang"].sum():,.1f}</td>'
+                    f'<td class="rpi-num">{df_green_rpi["Terbuang Gudang"].sum():,.1f}</td>'
                     f'<td class="rpi-num">{_esc_rpi(rp(df_green_rpi["Pendapatan Gudang"].sum()))}</td>'
                     f'<td class="rpi-num">{_esc_rpi(rp(df_green_rpi["Laba Gudang"].sum()))}</td></tr>'
                     "<tr><th>Jenis</th><th>Grade</th><th>Total Grading</th><th>Tonase Lahan</th><th>Stok Gudang</th>"
-                    "<th>Terjual Gudang</th><th>Pendapatan Gudang</th><th>Laba Gudang</th></tr>"
+                    "<th>Terjual Gudang</th><th>Terbuang Gudang</th><th>Pendapatan Gudang</th><th>Laba Gudang</th></tr>"
                     "</thead>"
                     f'<tbody>{"".join(rows_g)}</tbody>'
                     "</table></div>"
@@ -2397,7 +2415,8 @@ with tab2:
 
     st.divider()
 
-    section_heading("📦 Stok Lapak & Gudang")
+    section_heading("📦 Sisa Stok per Jenis + Grade")
+    st.caption("📅 Stok dihitung dari invoice yang masuk di rentang tanggal sidebar.")
 
     frames_stok = []
     stok_warnings = []
@@ -2416,33 +2435,40 @@ with tab2:
             .to_dict()
         )
 
+    # Kalau rentang tanggal sidebar belum lengkap dipilih, stok tidak difilter tanggal.
+    _filter_tgl_stok = bool(date_range) and isinstance(date_range, tuple) and len(date_range) == 2
+
     if df_stok_lapak_invoice_raw.empty:
         stok_warnings.append("Sheet 'STOK LAPAK' kosong atau tidak ditemukan.")
-    elif not all(c in df_stok_lapak_invoice_raw.columns for c in ["TUJUAN", "STOK LAPAK", "INVOICE"]):
-        stok_warnings.append("Kolom 'TUJUAN'/'STOK LAPAK'/'INVOICE' tidak lengkap di sheet STOK LAPAK.")
+    elif not all(c in df_stok_lapak_invoice_raw.columns for c in ["TUJUAN", "STOK LAPAK", "INVOICE", "JENIS", "GRADE"]):
+        stok_warnings.append("Kolom 'TUJUAN'/'STOK LAPAK'/'INVOICE'/'JENIS'/'GRADE' tidak lengkap di sheet STOK LAPAK.")
     else:
         tmp_sl = df_stok_lapak_invoice_raw[df_stok_lapak_invoice_raw["TUJUAN"].apply(is_filled)].copy()
         # Ikut filter tanggal sidebar (bulan berjalan secara default), pakai
         # tanggal invoice dari BARANG_MASUK (lihat peta_tgl_invoice di atas).
         tmp_sl["Tanggal_Invoice"] = tmp_sl["INVOICE"].map(peta_tgl_invoice)
-        tmp_sl = tmp_sl[tmp_sl["Tanggal_Invoice"].notna() & (tmp_sl["Tanggal_Invoice"] >= start_ts) & (tmp_sl["Tanggal_Invoice"] <= end_ts)]
+        tmp_sl = tmp_sl[tmp_sl["Tanggal_Invoice"].notna()]
+        if _filter_tgl_stok:
+            tmp_sl = tmp_sl[(tmp_sl["Tanggal_Invoice"] >= start_ts) & (tmp_sl["Tanggal_Invoice"] <= end_ts)]
         tmp_sl["Tipe"] = "Lapak"
         tmp_sl["Stok (KG)"] = tmp_sl["STOK LAPAK"]
-        frames_stok.append(tmp_sl[["Tipe", "TUJUAN", "INVOICE", "Stok (KG)"]])
+        frames_stok.append(tmp_sl[["Tipe", "TUJUAN", "INVOICE", "JENIS", "GRADE", "Stok (KG)"]])
 
     if df_barang_masuk_raw.empty:
         stok_warnings.append("Sheet 'BARANG_MASUK' kosong atau tidak ditemukan.")
-    elif not all(c in df_barang_masuk_raw.columns for c in ["TUJUAN", "STOK GUDANG", "INVOICE", "Tanggal_Lengkap"]):
-        stok_warnings.append("Kolom 'TUJUAN'/'STOK GUDANG'/'INVOICE'/Tanggal tidak lengkap di sheet BARANG_MASUK.")
+    elif not all(c in df_barang_masuk_raw.columns for c in ["TUJUAN", "STOK GUDANG", "INVOICE", "Tanggal_Lengkap", "JENIS", "GRADE"]):
+        stok_warnings.append("Kolom 'TUJUAN'/'STOK GUDANG'/'INVOICE'/'JENIS'/'GRADE'/Tanggal tidak lengkap di sheet BARANG_MASUK.")
     else:
         tmp_sg = df_barang_masuk_raw[
             df_barang_masuk_raw["TUJUAN"].apply(is_filled)
             & df_barang_masuk_raw["TUJUAN"].astype(str).str.strip().str.upper().isin(["GDC", "GDM"])
         ].copy()
-        tmp_sg = tmp_sg[(tmp_sg["Tanggal_Lengkap"] >= start_ts) & (tmp_sg["Tanggal_Lengkap"] <= end_ts)]
+        tmp_sg = tmp_sg[tmp_sg["Tanggal_Lengkap"].notna()]
+        if _filter_tgl_stok:
+            tmp_sg = tmp_sg[(tmp_sg["Tanggal_Lengkap"] >= start_ts) & (tmp_sg["Tanggal_Lengkap"] <= end_ts)]
         tmp_sg["Tipe"] = "Gudang"
         tmp_sg["Stok (KG)"] = tmp_sg["STOK GUDANG"]
-        frames_stok.append(tmp_sg[["Tipe", "TUJUAN", "INVOICE", "Stok (KG)"]])
+        frames_stok.append(tmp_sg[["Tipe", "TUJUAN", "INVOICE", "JENIS", "GRADE", "Stok (KG)"]])
 
     for _msg in stok_warnings:
         st.warning(_msg)
@@ -2453,74 +2479,127 @@ with tab2:
         st.info("Belum ada data stok (Lapak maupun Gudang GDC/GDM) yang bisa ditampilkan.")
     else:
         df_stok_gabungan["Stok (KG)"] = to_number(df_stok_gabungan["Stok (KG)"])
-        df_stok_gabungan["INVOICE"] = df_stok_gabungan["INVOICE"].fillna("-").astype(str).str.strip().replace({"": "-", "nan": "-", "None": "-"})
 
-        st.markdown(
-            f'<div class="big-total">📦 Total Stok Keseluruhan: '
-            f'{df_stok_gabungan["Stok (KG)"].sum():,.1f} KG</div>',
-            unsafe_allow_html=True
+        # Label "Jenis + Grade" (mis. "JUVE A", "BULAT RUT") -- stok dijumlahkan dari
+        # SEMUA invoice, jadi nomor invoice tidak ditampilkan. Huruf dibesarkan dan
+        # spasi dirapikan supaya "Juve A" dan "JUVE  A" tidak terpecah jadi dua baris.
+        # Jenis/Grade yang kosong tetap dihitung (label khusus) supaya total stok tidak
+        # berkurang diam-diam.
+        def _rapikan_jg(s):
+            return (
+                s.where(s.apply(is_filled), "").astype(str)
+                .str.upper().str.replace(r"\s+", " ", regex=True).str.strip()
+            )
+        df_stok_gabungan["Jenis + Grade"] = (
+            (_rapikan_jg(df_stok_gabungan["JENIS"]) + " " + _rapikan_jg(df_stok_gabungan["GRADE"]))
+            .str.strip().replace("", "(Jenis/Grade kosong)")
+        )
+        # Gudang diberi tambahan "(Gudang)" supaya tidak tertukar kalau ada lapak yang namanya sama.
+        _nama_lokasi_stok = df_stok_gabungan["TUJUAN"].astype(str).str.strip()
+        df_stok_gabungan["Lokasi"] = _nama_lokasi_stok.where(
+            df_stok_gabungan["Tipe"] == "Lapak", _nama_lokasi_stok + " (Gudang)"
         )
 
-        lokasi_opts_stok = sorted(df_stok_gabungan["TUJUAN"].dropna().astype(str).unique())
-        sel_lokasi_stok = st.multiselect(
-            "🔎 Filter Lokasi (Lapak/Gudang)", lokasi_opts_stok, default=lokasi_opts_stok,
-            key="tab2_stok_lokasi_filter"
+        tipe_stok = st.radio(
+            "Tampilkan stok", ["Lapak", "Gudang", "Lapak + Gudang"],
+            horizontal=True, key="tab2_stok_tipe"
         )
-
-        if not sel_lokasi_stok:
-            st.info("Pilih minimal satu lokasi (lapak/gudang) untuk menampilkan rincian stok.")
+        if tipe_stok == "Lapak + Gudang":
+            df_stok_tipe = df_stok_gabungan
         else:
-            df_stok_filtered = df_stok_gabungan[df_stok_gabungan["TUJUAN"].astype(str).isin(sel_lokasi_stok)].copy()
+            df_stok_tipe = df_stok_gabungan[df_stok_gabungan["Tipe"] == tipe_stok]
 
-            per_lok_invoice = (
-                df_stok_filtered.groupby(["Tipe", "TUJUAN", "INVOICE"])["Stok (KG)"]
-                .sum().reset_index()
+        if df_stok_tipe.empty:
+            st.info(f"Belum ada data stok {tipe_stok.lower()} di rentang tanggal ini.")
+        else:
+            judul_total_stok = {
+                "Lapak": "Sisa Stok Lapak", "Gudang": "Sisa Stok Gudang",
+                "Lapak + Gudang": "Sisa Stok Lapak + Gudang",
+            }[tipe_stok]
+            st.markdown(
+                f'<div class="big-total">📦 Total {judul_total_stok}: '
+                f'{df_stok_tipe["Stok (KG)"].sum():,.1f} KG</div>',
+                unsafe_allow_html=True
             )
 
-            total_per_lokasi = (
-                per_lok_invoice.groupby("TUJUAN")["Stok (KG)"].sum()
-                .sort_values(ascending=False)
+            lokasi_opts_stok = sorted(df_stok_tipe["Lokasi"].dropna().astype(str).unique())
+            sel_lokasi_stok = st.multiselect(
+                "🔎 Filter Lokasi", lokasi_opts_stok, default=lokasi_opts_stok,
+                key=f"tab2_stok_lokasi_filter_{tipe_stok}"
             )
-            urutan_lokasi_stok = total_per_lokasi.index.tolist()
 
-            st.metric("Total Stok (Lokasi Terpilih)", f"{per_lok_invoice['Stok (KG)'].sum():,.1f} KG")
+            if not sel_lokasi_stok:
+                st.info("Pilih minimal satu lokasi untuk menampilkan rincian stok.")
+            else:
+                df_stok_filtered = df_stok_tipe[df_stok_tipe["Lokasi"].astype(str).isin(sel_lokasi_stok)].copy()
 
-            st.markdown("**📍 Total Stok per Lapak/Gudang**")
-            tabel_total_lokasi = (
-                per_lok_invoice.groupby(["Tipe", "TUJUAN"])["Stok (KG)"].sum()
-                .reset_index()
-                .sort_values("Stok (KG)", ascending=False)
-                .rename(columns={"TUJUAN": "Lokasi"})
-            )
-            tabel_total_lokasi["Stok (KG)"] = tabel_total_lokasi["Stok (KG)"].apply(lambda x: f"{x:,.1f} KG")
-            st.dataframe(tabel_total_lokasi, use_container_width=True, hide_index=True)
+                st.metric("Total Stok (Lokasi Terpilih)", f"{df_stok_filtered['Stok (KG)'].sum():,.1f} KG")
 
-            fig_stok_gab = px.bar(
-                per_lok_invoice, x="TUJUAN", y="Stok (KG)", color="INVOICE",
-                barmode="stack",
-                category_orders={"TUJUAN": urutan_lokasi_stok},
-                title="Stok per Lokasi (Lapak/Gudang), dipecah Invoice",
-                labels={"TUJUAN": "Lokasi (Lapak/Gudang)"}
-            )
-            fig_stok_gab.update_layout(
-                legend=dict(orientation="h", yanchor="bottom", y=1.02),
-                height=520, xaxis_tickangle=-30
-            )
-            for lok in urutan_lokasi_stok:
-                fig_stok_gab.add_annotation(
-                    x=lok, y=total_per_lokasi.loc[lok],
-                    text=f"<b>{total_per_lokasi.loc[lok]:,.1f} KG</b>",
-                    showarrow=False, yshift=14,
-                    font=dict(size=12, color="#1f3864")
+                # Jenis + Grade yang stoknya 0 KG di SEMUA lokasi terpilih (sudah habis)
+                # disembunyikan; yang minus tetap tampil supaya kelihatan ada yang janggal.
+                _ada_stok_jg = (
+                    df_stok_filtered.assign(_abs=df_stok_filtered["Stok (KG)"].abs())
+                    .groupby("Jenis + Grade")["_abs"].sum().round(1) != 0
                 )
-            pad_yaxis(fig_stok_gab, total_per_lokasi.max() if not total_per_lokasi.empty else 0, pad=0.3)
-            st_plotly(fig_stok_gab, use_container_width=True)
+                n_habis_stok = int((~_ada_stok_jg).sum())
+                df_stok_jg = df_stok_filtered[df_stok_filtered["Jenis + Grade"].isin(_ada_stok_jg[_ada_stok_jg].index)]
 
-            tabel_stok_gab = per_lok_invoice.sort_values(["TUJUAN", "Stok (KG)"], ascending=[True, False]).copy()
-            tabel_stok_gab = tabel_stok_gab[["Tipe", "TUJUAN", "INVOICE", "Stok (KG)"]].rename(columns={"TUJUAN": "Lokasi"})
-            tabel_stok_gab["Stok (KG)"] = tabel_stok_gab["Stok (KG)"].apply(lambda x: f"{x:,.1f} KG")
-            st.dataframe(tabel_stok_gab, use_container_width=True, hide_index=True)
+                st.markdown("**🏷️ Rincian per Jenis + Grade**")
+                if df_stok_jg.empty:
+                    st.info("Stok semua jenis + grade di lokasi terpilih sudah 0 KG.")
+                else:
+                    total_per_jg = df_stok_jg.groupby("Jenis + Grade")["Stok (KG)"].sum().sort_values(ascending=False)
+                    urutan_jg = total_per_jg.index.tolist()
+                    total_per_lokasi = df_stok_jg.groupby("Lokasi")["Stok (KG)"].sum().sort_values(ascending=False)
+                    urutan_lokasi_stok = total_per_lokasi.index.tolist()
+                    per_jg_lokasi = df_stok_jg.groupby(["Jenis + Grade", "Lokasi"], as_index=False)["Stok (KG)"].sum()
 
+                    fig_stok_gab = px.bar(
+                        per_jg_lokasi, x="Jenis + Grade", y="Stok (KG)", color="Lokasi",
+                        barmode="stack",
+                        category_orders={"Jenis + Grade": urutan_jg, "Lokasi": urutan_lokasi_stok},
+                        title="Sisa Stok per Jenis + Grade, dipecah Lokasi"
+                    )
+                    fig_stok_gab.update_layout(
+                        legend=dict(orientation="h", yanchor="bottom", y=1.02),
+                        height=520, xaxis_tickangle=-30
+                    )
+                    for jg in urutan_jg:
+                        fig_stok_gab.add_annotation(
+                            x=jg, y=total_per_jg.loc[jg],
+                            text=f"<b>{total_per_jg.loc[jg]:,.1f} KG</b>",
+                            showarrow=False, yshift=14,
+                            font=dict(size=12, color="#1f3864")
+                        )
+                    pad_yaxis(fig_stok_gab, total_per_jg.max() if not total_per_jg.empty else 0, pad=0.3)
+                    if total_per_jg.min() < 0:
+                        # stok minus: sumbu Y diturunkan supaya batangnya tidak terpotong
+                        fig_stok_gab.update_yaxes(range=[total_per_jg.min() * 1.3, max(total_per_jg.max(), 0) * 1.3])
+                    st_plotly(fig_stok_gab, use_container_width=True)
+
+                    # Tabel: baris = Jenis + Grade, kolom = tiap lokasi + Total (terbesar di atas).
+                    pivot_stok_jg = (
+                        per_jg_lokasi.pivot_table(index="Jenis + Grade", columns="Lokasi", values="Stok (KG)", aggfunc="sum")
+                        .reindex(index=urutan_jg, columns=urutan_lokasi_stok)
+                        .fillna(0)
+                    )
+                    tabel_stok_jg = pd.DataFrame({"Jenis + Grade": urutan_jg})
+                    for lok in urutan_lokasi_stok:
+                        tabel_stok_jg[lok] = ["-" if round(v, 1) == 0 else f"{v:,.1f} KG" for v in pivot_stok_jg[lok]]
+                    tabel_stok_jg["Total"] = [f"{total_per_jg.loc[jg]:,.1f} KG" for jg in urutan_jg]
+                    st.dataframe(tabel_stok_jg, use_container_width=True, hide_index=True)
+                    if n_habis_stok:
+                        st.caption(f"ℹ️ {n_habis_stok} kombinasi jenis + grade dengan stok 0 KG tidak ditampilkan.")
+
+                st.markdown("**📍 Total Stok per Lapak/Gudang**")
+                tabel_total_lokasi = (
+                    df_stok_filtered.groupby(["Tipe", "TUJUAN"])["Stok (KG)"].sum()
+                    .reset_index()
+                    .sort_values("Stok (KG)", ascending=False)
+                    .rename(columns={"TUJUAN": "Lokasi"})
+                )
+                tabel_total_lokasi["Stok (KG)"] = tabel_total_lokasi["Stok (KG)"].apply(lambda x: f"{x:,.1f} KG")
+                st.dataframe(tabel_total_lokasi, use_container_width=True, hide_index=True)
     st.divider()
 
     if df_penjualan.empty:
