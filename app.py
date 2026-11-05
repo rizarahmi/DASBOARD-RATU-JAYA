@@ -151,6 +151,11 @@ SHEET_GH_TANAMAN   = "GREEN HOUSE TANAMAN"
 HARGA_COK_AB  = 4428
 HARGA_COK_RUT = 2214
 
+# Kode yang dianggap GUDANG di Analisa Lapak > "Sisa Stok per Jenis + Grade". Semua kode
+# lain (CKP, CBT1, CBT2, JTK1, JTK2, JTM, PML, PML2, ...) dianggap LAPAK. Ada gudang baru?
+# Cukup tambahkan kodenya di sini.
+KODE_GUDANG_STOK = ("GDC", "GDM", "BDG")
+
 # LOGIN
 def check_password() -> bool:
     def password_entered():
@@ -2261,15 +2266,16 @@ with tab2:
                 # sekali per kelompok (gaya sel gabungan) di HTML nanti.
                 df_pink_rpi["Total Pendapatan"] = df_pink_rpi.groupby("TUJUAN")["Pendapatan"].transform("sum")
 
-            # Total Pendapatan & Total Laba = gabungan Data Gudang + Data Lapak
-            # (setelah moving), dipakai untuk metrik ringkasan di atas tabel.
+            # Total Pendapatan = gabungan Data Gudang + Data Lapak (setelah moving),
+            # dipakai untuk metrik ringkasan di atas tabel.
             total_pendapatan_gudang_rpi = float(df_green_rpi["Pendapatan Gudang"].sum()) if not df_green_rpi.empty else 0.0
             total_pendapatan_lapak_rpi = float(df_pink_rpi["Pendapatan"].sum()) if not df_pink_rpi.empty else 0.0
             total_pendapatan_rpi = total_pendapatan_gudang_rpi + total_pendapatan_lapak_rpi
 
-            total_laba_gudang_rpi = float(df_green_rpi["Laba Gudang"].sum()) if not df_green_rpi.empty else 0.0
-            total_laba_lapak_rpi = float(df_pink_rpi["Laba"].sum()) if not df_pink_rpi.empty else 0.0
-            total_laba_rpi = total_laba_gudang_rpi + total_laba_lapak_rpi
+            # Total Laba = Total Pendapatan - Modal Beli (Lahan) -- dihitung langsung
+            # dari dua angka itu, BUKAN jumlah kolom Laba/Keuntungan per baris di
+            # tabel (kolom Laba di tabel tetap apa adanya, itu laba per baris).
+            total_laba_rpi = total_pendapatan_rpi - modal_beli_rpi
 
             total_moving_rpi = float(df_pink_rpi["JUMLAH MOVING"].sum()) if not df_pink_rpi.empty and "JUMLAH MOVING" in df_pink_rpi.columns else 0.0
             # Total Tonnase Terbuang = terbuang di Gudang (tabel HIJAU) + terbuang di
@@ -2282,7 +2288,7 @@ with tab2:
             agg_cols_rpi = st.columns(5)
             agg_cols_rpi[0].metric("💰 Modal Beli (Lahan)", rp(modal_beli_rpi))
             agg_cols_rpi[1].metric("📈 Total Pendapatan", rp(total_pendapatan_rpi))
-            agg_cols_rpi[2].metric("💵 Total Laba", rp(total_laba_rpi))
+            agg_cols_rpi[2].metric("💵 Total Laba", rp(total_laba_rpi), help="Total Pendapatan − Modal Beli (Lahan)")
             agg_cols_rpi[3].metric("🚚 Total Moving", f"{total_moving_rpi:,.0f} KG")
             agg_cols_rpi[4].metric("🗑️ Total Tonnase Terbuang", f"{total_tonnase_buang_rpi:,.0f} KG")
             st.write("")
@@ -2416,10 +2422,34 @@ with tab2:
     st.divider()
 
     section_heading("📦 Sisa Stok per Jenis + Grade")
-    st.caption("📅 Stok dihitung dari invoice yang masuk di rentang tanggal sidebar.")
+
+    # Sisa stok = kondisi SEKARANG, jadi secara default TIDAK dibatasi tanggal. Dulu stok
+    # otomatis ikut rentang sidebar (bulan berjalan) lewat tanggal invoice, akibatnya lapak
+    # yang stoknya berasal dari invoice bulan-bulan sebelumnya (mis. PML, PML2, JTK2) tidak
+    # muncul sama sekali. Centang di bawah mengembalikan pembatasan itu kalau memang perlu.
+    batasi_tgl_stok = st.checkbox(
+        "Batasi ke invoice yang masuk di rentang tanggal sidebar",
+        value=False, key="tab2_stok_batasi_tgl"
+    )
+    # Kalau rentang tanggal sidebar belum lengkap dipilih, stok tidak difilter tanggal.
+    _filter_tgl_stok = bool(batasi_tgl_stok) and bool(date_range) and isinstance(date_range, tuple) and len(date_range) == 2
+    if _filter_tgl_stok:
+        st.caption("📅 Hanya stok dari invoice yang masuk di rentang tanggal sidebar.")
+    else:
+        st.caption("📦 Semua sisa stok yang tercatat di sheet, tanpa batas tanggal.")
 
     frames_stok = []
     stok_warnings = []
+
+    def _kode_lokasi(s):
+        # Kode lapak/gudang dirapikan (spasi dibuang, huruf besar) supaya "ckp" dan
+        # "CKP " tidak terpecah jadi dua lokasi.
+        return s.astype(str).str.strip().str.upper()
+
+    _set_gudang_stok = {str(k).strip().upper() for k in KODE_GUDANG_STOK}
+
+    def _tipe_lokasi(k):
+        return "Gudang" if k in _set_gudang_stok else "Lapak"
 
     # Peta Invoice -> Tanggal dari BARANG_MASUK (sumber tanggal yang sudah
     # terbukti reliable), dipakai untuk menentukan tanggal baris STOK LAPAK --
@@ -2435,38 +2465,59 @@ with tab2:
             .to_dict()
         )
 
-    # Kalau rentang tanggal sidebar belum lengkap dipilih, stok tidak difilter tanggal.
-    _filter_tgl_stok = bool(date_range) and isinstance(date_range, tuple) and len(date_range) == 2
+    # Pasangan (Invoice, Kode) yang sudah punya baris di sheet STOK LAPAK -- dipakai di
+    # bawah supaya barang yang dikirim langsung ke lapak (dicatat di BARANG_MASUK) tidak
+    # terhitung dobel.
+    pasangan_stok_lapak = set()
 
+    # ---- Sheet STOK LAPAK: stok di lapak tujuan Moving (kolom T) ----
+    # Tipe ditentukan dari KODE-nya (KODE_GUDANG_STOK), bukan dari sheet asalnya: barang
+    # yang di-moving ke BDG/GDM secara fisik ada di gudang itu, jadi ikut dihitung sebagai
+    # stok Gudang BDG/GDM (bukan lapak bernama BDG/GDM).
     if df_stok_lapak_invoice_raw.empty:
         stok_warnings.append("Sheet 'STOK LAPAK' kosong atau tidak ditemukan.")
     elif not all(c in df_stok_lapak_invoice_raw.columns for c in ["TUJUAN", "STOK LAPAK", "INVOICE", "JENIS", "GRADE"]):
         stok_warnings.append("Kolom 'TUJUAN'/'STOK LAPAK'/'INVOICE'/'JENIS'/'GRADE' tidak lengkap di sheet STOK LAPAK.")
     else:
         tmp_sl = df_stok_lapak_invoice_raw[df_stok_lapak_invoice_raw["TUJUAN"].apply(is_filled)].copy()
-        # Ikut filter tanggal sidebar (bulan berjalan secara default), pakai
-        # tanggal invoice dari BARANG_MASUK (lihat peta_tgl_invoice di atas).
-        tmp_sl["Tanggal_Invoice"] = tmp_sl["INVOICE"].map(peta_tgl_invoice)
-        tmp_sl = tmp_sl[tmp_sl["Tanggal_Invoice"].notna()]
+        tmp_sl["TUJUAN"] = _kode_lokasi(tmp_sl["TUJUAN"])
+        tmp_sl["INVOICE"] = tmp_sl["INVOICE"].astype(str).str.strip()
+        pasangan_stok_lapak = set(zip(tmp_sl["INVOICE"], tmp_sl["TUJUAN"]))
         if _filter_tgl_stok:
+            # Dibatasi tanggal: pakai tanggal invoice dari BARANG_MASUK (lihat
+            # peta_tgl_invoice di atas); baris tanpa tanggal invoice tidak ikut.
+            tmp_sl["Tanggal_Invoice"] = tmp_sl["INVOICE"].map(peta_tgl_invoice)
+            tmp_sl = tmp_sl[tmp_sl["Tanggal_Invoice"].notna()]
             tmp_sl = tmp_sl[(tmp_sl["Tanggal_Invoice"] >= start_ts) & (tmp_sl["Tanggal_Invoice"] <= end_ts)]
-        tmp_sl["Tipe"] = "Lapak"
+        tmp_sl["Tipe"] = tmp_sl["TUJUAN"].map(_tipe_lokasi)
         tmp_sl["Stok (KG)"] = tmp_sl["STOK LAPAK"]
         frames_stok.append(tmp_sl[["Tipe", "TUJUAN", "INVOICE", "JENIS", "GRADE", "Stok (KG)"]])
 
+    # ---- Sheet BARANG_MASUK: stok di gudang (kolom STOK GUDANG) ----
     if df_barang_masuk_raw.empty:
         stok_warnings.append("Sheet 'BARANG_MASUK' kosong atau tidak ditemukan.")
-    elif not all(c in df_barang_masuk_raw.columns for c in ["TUJUAN", "STOK GUDANG", "INVOICE", "Tanggal_Lengkap", "JENIS", "GRADE"]):
-        stok_warnings.append("Kolom 'TUJUAN'/'STOK GUDANG'/'INVOICE'/'JENIS'/'GRADE'/Tanggal tidak lengkap di sheet BARANG_MASUK.")
+    elif not all(c in df_barang_masuk_raw.columns for c in ["TUJUAN", "STOK GUDANG", "INVOICE", "JENIS", "GRADE"]):
+        stok_warnings.append("Kolom 'TUJUAN'/'STOK GUDANG'/'INVOICE'/'JENIS'/'GRADE' tidak lengkap di sheet BARANG_MASUK.")
+    elif _filter_tgl_stok and "Tanggal_Lengkap" not in df_barang_masuk_raw.columns:
+        stok_warnings.append("Kolom tanggal tidak ditemukan di sheet BARANG_MASUK, jadi stok tidak bisa dibatasi tanggal.")
     else:
-        tmp_sg = df_barang_masuk_raw[
-            df_barang_masuk_raw["TUJUAN"].apply(is_filled)
-            & df_barang_masuk_raw["TUJUAN"].astype(str).str.strip().str.upper().isin(["GDC", "GDM"])
-        ].copy()
-        tmp_sg = tmp_sg[tmp_sg["Tanggal_Lengkap"].notna()]
+        tmp_sg = df_barang_masuk_raw[df_barang_masuk_raw["TUJUAN"].apply(is_filled)].copy()
+        tmp_sg["TUJUAN"] = _kode_lokasi(tmp_sg["TUJUAN"])
+        tmp_sg["INVOICE"] = tmp_sg["INVOICE"].astype(str).str.strip()
+        tmp_sg["Tipe"] = tmp_sg["TUJUAN"].map(_tipe_lokasi)
+        # Tujuan yang BUKAN gudang (mis. PML2) = barang dikirim langsung ke lapak. Stoknya
+        # tetap dihitung sebagai stok LAPAK itu (supaya invoice terbaru yang belum
+        # dimasukkan ke sheet STOK LAPAK tidak hilang), KECUALI invoice itu sudah punya
+        # baris di STOK LAPAK untuk lapak yang sama -- stoknya sudah dihitung dari sana.
+        # Aturannya sama dengan Rincian per Invoice di atas (tabel Gudang dikosongkan).
+        sudah_di_stok_lapak = pd.Series(
+            [(inv, kode) in pasangan_stok_lapak for inv, kode in zip(tmp_sg["INVOICE"], tmp_sg["TUJUAN"])],
+            index=tmp_sg.index, dtype=bool
+        )
+        tmp_sg = tmp_sg[(tmp_sg["Tipe"] == "Gudang") | ~sudah_di_stok_lapak]
         if _filter_tgl_stok:
+            tmp_sg = tmp_sg[tmp_sg["Tanggal_Lengkap"].notna()]
             tmp_sg = tmp_sg[(tmp_sg["Tanggal_Lengkap"] >= start_ts) & (tmp_sg["Tanggal_Lengkap"] <= end_ts)]
-        tmp_sg["Tipe"] = "Gudang"
         tmp_sg["Stok (KG)"] = tmp_sg["STOK GUDANG"]
         frames_stok.append(tmp_sg[["Tipe", "TUJUAN", "INVOICE", "JENIS", "GRADE", "Stok (KG)"]])
 
@@ -2476,7 +2527,7 @@ with tab2:
     df_stok_gabungan = pd.concat(frames_stok, ignore_index=True) if frames_stok else pd.DataFrame()
 
     if df_stok_gabungan.empty:
-        st.info("Belum ada data stok (Lapak maupun Gudang GDC/GDM) yang bisa ditampilkan.")
+        st.info("Belum ada data stok (Lapak maupun Gudang) yang bisa ditampilkan.")
     else:
         df_stok_gabungan["Stok (KG)"] = to_number(df_stok_gabungan["Stok (KG)"])
 
@@ -2510,7 +2561,7 @@ with tab2:
             df_stok_tipe = df_stok_gabungan[df_stok_gabungan["Tipe"] == tipe_stok]
 
         if df_stok_tipe.empty:
-            st.info(f"Belum ada data stok {tipe_stok.lower()} di rentang tanggal ini.")
+            st.info(f"Belum ada data stok {tipe_stok.lower()}" + (" di rentang tanggal ini." if _filter_tgl_stok else "."))
         else:
             judul_total_stok = {
                 "Lapak": "Sisa Stok Lapak", "Gudang": "Sisa Stok Gudang",
@@ -2523,9 +2574,12 @@ with tab2:
             )
 
             lokasi_opts_stok = sorted(df_stok_tipe["Lokasi"].dropna().astype(str).unique())
+            # Key ikut pilihan tipe stok dan batas tanggal: daftar lokasinya beda di tiap
+            # kombinasi, jadi tiap kombinasi mulai lagi dari "semua lokasi terpilih" (tanpa
+            # ini, pilihan lama yang sudah tidak ada di daftar baru bikin filter jadi kosong).
             sel_lokasi_stok = st.multiselect(
                 "🔎 Filter Lokasi", lokasi_opts_stok, default=lokasi_opts_stok,
-                key=f"tab2_stok_lokasi_filter_{tipe_stok}"
+                key=f"tab2_stok_lokasi_filter_{tipe_stok}" + ("_tgl" if _filter_tgl_stok else "")
             )
 
             if not sel_lokasi_stok:
@@ -2554,28 +2608,55 @@ with tab2:
                     urutan_lokasi_stok = total_per_lokasi.index.tolist()
                     per_jg_lokasi = df_stok_jg.groupby(["Jenis + Grade", "Lokasi"], as_index=False)["Stok (KG)"].sum()
 
+                    # Palet bawaan hanya 10 warna lalu berulang. Di tampilan "Lapak + Gudang" lokasinya
+                    # bisa 11 atau lebih, jadi dua lokasi bisa sama warna -> tambah warna cadangan
+                    # (10 warna pertama sama dengan palet Streamlit supaya tampilannya tidak berubah).
+                    _warna_lokasi_stok = None
+                    if len(urutan_lokasi_stok) > 10:
+                        _warna_lokasi_stok = [
+                            "#0068c9", "#83c9ff", "#ff2b2b", "#ffabab", "#29b09d", "#7defa1",
+                            "#ff8700", "#ffd16a", "#6d3fc0", "#d5dae5",
+                            "#8c564b", "#e377c2", "#17becf", "#7f7f7f", "#bcbd22", "#a6761d",
+                        ]
                     fig_stok_gab = px.bar(
                         per_jg_lokasi, x="Jenis + Grade", y="Stok (KG)", color="Lokasi",
                         barmode="stack",
                         category_orders={"Jenis + Grade": urutan_jg, "Lokasi": urutan_lokasi_stok},
+                        color_discrete_sequence=_warna_lokasi_stok,
                         title="Sisa Stok per Jenis + Grade, dipecah Lokasi"
                     )
+                    # Kalau jenis + grade-nya banyak (stok tanpa batas tanggal bisa puluhan), label
+                    # sumbu X dimiringkan penuh dan angka di atas batang hanya untuk 12 terbesar --
+                    # kalau semuanya diberi angka, tulisannya saling menumpuk dan tidak terbaca.
+                    # Angka lengkap tetap ada di tabel di bawah grafik dan di tooltip batang.
+                    _banyak_jg = len(urutan_jg) > 15
                     fig_stok_gab.update_layout(
                         legend=dict(orientation="h", yanchor="bottom", y=1.02),
-                        height=520, xaxis_tickangle=-30
+                        height=580 if len(urutan_jg) > 25 else 520,
+                        xaxis_tickangle=-90 if len(urutan_jg) > 25 else -30
                     )
-                    for jg in urutan_jg:
+                    for jg in (urutan_jg[:12] if _banyak_jg else urutan_jg):
+                        if _banyak_jg:
+                            # teks ditegakkan (vertikal) di atas batang supaya lebarnya cuma satu batang
+                            _minus = total_per_jg.loc[jg] < 0
+                            _gaya_angka = dict(
+                                textangle=-90, yanchor="top" if _minus else "bottom",
+                                yshift=-3 if _minus else 3, font=dict(size=11, color="#1f3864")
+                            )
+                        else:
+                            _gaya_angka = dict(yshift=14, font=dict(size=12, color="#1f3864"))
                         fig_stok_gab.add_annotation(
                             x=jg, y=total_per_jg.loc[jg],
                             text=f"<b>{total_per_jg.loc[jg]:,.1f} KG</b>",
-                            showarrow=False, yshift=14,
-                            font=dict(size=12, color="#1f3864")
+                            showarrow=False, **_gaya_angka
                         )
                     pad_yaxis(fig_stok_gab, total_per_jg.max() if not total_per_jg.empty else 0, pad=0.3)
                     if total_per_jg.min() < 0:
                         # stok minus: sumbu Y diturunkan supaya batangnya tidak terpotong
                         fig_stok_gab.update_yaxes(range=[total_per_jg.min() * 1.3, max(total_per_jg.max(), 0) * 1.3])
                     st_plotly(fig_stok_gab, use_container_width=True)
+                    if _banyak_jg:
+                        st.caption("ℹ️ Angka di atas batang hanya untuk 12 jenis + grade terbesar. Angka lengkap ada di tabel di bawah grafik.")
 
                     # Tabel: baris = Jenis + Grade, kolom = tiap lokasi + Total (terbesar di atas).
                     pivot_stok_jg = (
