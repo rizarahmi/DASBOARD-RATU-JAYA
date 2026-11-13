@@ -156,6 +156,13 @@ HARGA_COK_RUT = 2214
 # Cukup tambahkan kodenya di sini.
 KODE_GUDANG_STOK = ("GDC", "GDM", "BDG")
 
+# Pengurang Total Seluruh Laba di tab Summary: KAS KELUAR di sheet ARUS KAS untuk kategori
+# (kolom JENIS) yang namanya memuat kata di bawah ini. Saat ini cocok dengan kategori "BEBAN"
+# dan "ANGSURAN MOBIL". Satu baris hanya dihitung di satu kelompok (kalau namanya memuat
+# keduanya, dianggap Angsuran).
+KATA_JENIS_ANGSURAN = "ANGSURAN"
+KATA_JENIS_BEBAN    = "BEBAN"
+
 # LOGIN
 def check_password() -> bool:
     def password_entered():
@@ -1934,10 +1941,39 @@ biaya_gh = (
 )
 laba_gh = omzet_gh - biaya_gh
 
-# Total di tab Summary = jumlah SEMUA yang tampil di Summary (Lapak, Lapak Luar,
-# Ekspedisi, Tanaman Panen, Green House).
-total_omzet = omzet_lapak + omzet_lapak_luar + omzet_ekspedisi + omzet_tanaman + omzet_gh
-total_laba  = laba_lapak + laba_lapak_luar + laba_ekspedisi + laba_tanaman + laba_gh
+# Pengeluaran Beban & Angsuran Mobil (sheet ARUS KAS), ikut rentang tanggal sidebar:
+# jumlah KAS KELUAR baris-baris yang kategorinya (kolom JENIS) memuat kata BEBAN / ANGSURAN
+# (lihat KATA_JENIS_* di atas). Keduanya DIKURANGKAN dari Total Seluruh Laba di bawah.
+_kas_beban_angsuran_ok = (
+    not df_kas_raw.empty and {"JENIS", "KAS KELUAR"} <= set(df_kas_raw.columns)
+)
+
+def _mask_jenis_kas(df):
+    # (baris Angsuran, baris Beban) menurut kolom JENIS; Beban tidak mencakup baris Angsuran.
+    jenis = df["JENIS"].astype(str)
+    is_angsuran = jenis.str.contains(KATA_JENIS_ANGSURAN, case=False, regex=False, na=False)
+    is_beban = jenis.str.contains(KATA_JENIS_BEBAN, case=False, regex=False, na=False) & ~is_angsuran
+    return is_angsuran, is_beban
+
+biaya_beban = 0
+biaya_angsuran_mobil = 0
+jenis_beban_terbaca = []
+jenis_angsuran_terbaca = []
+if _kas_beban_angsuran_ok:
+    # Nama kategori yang kena (dari SELURUH sheet, bukan cuma periode terpilih) -- buat keterangan.
+    _ang_semua, _beb_semua = _mask_jenis_kas(df_kas_raw)
+    jenis_angsuran_terbaca = sorted(df_kas_raw.loc[_ang_semua, "JENIS"].dropna().unique())
+    jenis_beban_terbaca    = sorted(df_kas_raw.loc[_beb_semua, "JENIS"].dropna().unique())
+    if not df_kas.empty:
+        _ang_periode, _beb_periode = _mask_jenis_kas(df_kas)
+        biaya_angsuran_mobil = df_kas.loc[_ang_periode, "KAS KELUAR"].sum()
+        biaya_beban          = df_kas.loc[_beb_periode, "KAS KELUAR"].sum()
+
+# Total di tab Summary = jumlah SEMUA yang tampil di Summary (Lapak, Lapak Luar, Ekspedisi,
+# Tanaman Panen, Green House). Total Laba DIKURANGI Pengeluaran Beban dan Angsuran Mobil.
+total_omzet     = omzet_lapak + omzet_lapak_luar + omzet_ekspedisi + omzet_tanaman + omzet_gh
+laba_semua_unit = laba_lapak + laba_lapak_luar + laba_ekspedisi + laba_tanaman + laba_gh
+total_laba      = laba_semua_unit - biaya_beban - biaya_angsuran_mobil
 
 # HEADER UTAMA
 st.title("📊 Dashboard Ratu Jaya")
@@ -1963,8 +1999,9 @@ tab1, tab2, tab2b, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab11, tab10 = st.t
 # TAB 1: SUMMARY
 with tab1:
     section_heading("🧮 Ringkasan Keseluruhan")
-    # Total = jumlah polos semua unit (lihat total_omzet / total_laba di atas); tidak
-    # ada perlakuan khusus kalau hasilnya minus -- warna kartu tetap.
+    # Omzet = jumlah polos semua unit. Laba = jumlah laba semua unit DIKURANGI Pengeluaran
+    # Beban dan Angsuran Mobil (lihat total_omzet / total_laba di atas); tidak ada perlakuan
+    # khusus kalau hasilnya minus -- warna kartu tetap.
     st.markdown(
         '<div class="hero-row">'
         + hero_card("💰 Total Seluruh Omzet", rp(total_omzet), "hero-blue")
@@ -1972,6 +2009,7 @@ with tab1:
         + '</div>',
         unsafe_allow_html=True
     )
+    st.caption("Total Seluruh Laba sudah dikurangi Pengeluaran Beban dan Angsuran Mobil (rincian di kartu 💸 di bawah).")
     st.write("")
 
     with st.container(border=True):
@@ -2012,6 +2050,24 @@ with tab1:
         gh3.metric("Laba Green House",         rp(laba_gh))
         if df_gh_kas_raw.empty or "Kas Masuk" not in df_gh_kas_raw.columns:
             st.caption("⚠️ Data Kas Masuk tidak ditemukan di sheet 'GREEN HOUSE KAS'.")
+
+    with st.container(border=True):
+        st.markdown('<div class="income-card-title">💸 Pengeluaran Beban & Angsuran Mobil</div>', unsafe_allow_html=True)
+        bb1, bb2, bb3 = st.columns(3)
+        bb1.metric("Pengeluaran Beban",      rp(biaya_beban))
+        bb2.metric("Angsuran Mobil",         rp(biaya_angsuran_mobil))
+        bb3.metric("Total Beban + Angsuran", rp(biaya_beban + biaya_angsuran_mobil))
+        if _kas_beban_angsuran_ok:
+            _kategori_beban_angsuran = ", ".join(jenis_beban_terbaca + jenis_angsuran_terbaca) or "BEBAN / ANGSURAN (belum ada di sheet)"
+            st.caption(
+                f"Total Seluruh Laba = laba semua unit ({rp(laba_semua_unit)}) − Beban − Angsuran Mobil. "
+                f"Sumber: sheet ARUS KAS, kolom KAS KELUAR, kategori (JENIS) {_kategori_beban_angsuran}, sesuai rentang tanggal sidebar."
+            )
+        else:
+            st.caption(
+                "⚠️ Beban dan Angsuran Mobil tidak bisa dibaca (sheet 'ARUS KAS' kosong atau kolom JENIS / KAS KELUAR tidak ditemukan), "
+                "jadi dianggap Rp 0 dan Total Seluruh Laba BELUM dikurangi keduanya."
+            )
 
     st.divider()
     section_heading("📊 Komposisi Omzet & Laba Keseluruhan")
@@ -2068,6 +2124,7 @@ with tab1:
             textfont_size=14
         )
         st_plotly(fig_pie_laba, use_container_width=True)
+        st.caption("Komposisi ini dihitung dari laba tiap unit usaha (sebelum dikurangi Beban dan Angsuran Mobil), jadi totalnya tidak sama dengan Total Seluruh Laba.")
         if _laba_negatif_pie:
             st.caption(
                 "Tidak tergambar di diagram karena laba negatif: "
