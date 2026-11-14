@@ -156,6 +156,11 @@ HARGA_COK_RUT = 2214
 # Cukup tambahkan kodenya di sini.
 KODE_GUDANG_STOK = ("GDC", "GDM", "BDG")
 
+# Pengurang Total Seluruh Laba di tab Summary: KAS KELUAR di sheet ARUS KAS untuk kategori
+# (kolom JENIS) yang namanya memuat kata di bawah ini. Saat ini cocok dengan kategori
+# "ANGSURAN MOBIL".
+KATA_JENIS_ANGSURAN = "ANGSURAN"
+
 # LOGIN
 def check_password() -> bool:
     def password_entered():
@@ -582,12 +587,29 @@ def load_penjualan_lapak_luar() -> pd.DataFrame:
     def _col_at(idx):
         return all_cols[idx] if idx < len(all_cols) else None
 
-    # Posisi kolom sheet LAPAK LUAR (spreadsheet DATA SAYA): A=Tanggal, B=Tanggal
-    # Nota Balik, C=Invoice, D=Nama Pelanggan. Tanggal_Lengkap (dipakai untuk
-    # filter tanggal sidebar Omzet/Laba) diambil dari TANGGAL NOTA BALIK (kolom
-    # B), BUKAN dari kolom A -- lihat override eksplisit di bawah, setelah
-    # _parse_tanggal(), supaya tidak salah kepilih kolom A yang kebetulan juga
-    # sama-sama bisa kena keyword pencarian "TANGGAL".
+    def _find_or_pos(names, idx):
+        # Cari kolom lewat NAMA header dulu (huruf besar/kecil diabaikan; kalau ada yang
+        # kembar, yang paling kiri dipakai). Baru kalau tidak ketemu pakai POSISI idx
+        # (hitungan mulai 0).
+        for n in names:
+            m = [c for c in all_cols if c.strip().lower() == n.lower()]
+            if m:
+                return m[0]
+        return _col_at(idx)
+
+    # Susunan kolom sheet LAPAK LUAR (spreadsheet DATA SAYA):
+    #   A Tanggal | B Tanggal Nota Balik | C Invoice | D Nama Pelanggan | E Nopol | F Driver |
+    #   G Jenis | H Grade | I Tonase Lahan (KG) | J Tonnase Nota Balik | K Harga Beli |
+    #   L Total Harga Beli | M Jerami per Grade | N Ongkir per Grade | O OVERHEAD (tambahan
+    #   HPP) | P HPP | Q Total Modal | R Harga Nota Balik | S Total Nota Balik | T OMZET | U LABA
+    # Sejak kolom O (OVERHEAD) disisipkan, semua kolom sesudahnya geser satu ke kanan
+    # (Total Modal P -> Q, Total Nota Balik R -> S, OMZET S -> T, LABA T -> U). HPP dan
+    # Total Modal di sheet sudah memuat overhead, jadi dashboard cukup membaca hasilnya.
+    #
+    # Tanggal_Lengkap (dipakai untuk filter tanggal sidebar Omzet/Laba) diambil dari
+    # TANGGAL NOTA BALIK (kolom B), BUKAN dari kolom A -- lihat override eksplisit di
+    # bawah, setelah _parse_tanggal(), supaya tidak salah kepilih kolom A yang kebetulan
+    # juga sama-sama bisa kena keyword pencarian "TANGGAL".
     col_tanggal       = _col_at(0)
     col_tgl_notabalik = _col_at(1)
     col_invoice       = _col_at(2)
@@ -596,18 +618,13 @@ def load_penjualan_lapak_luar() -> pd.DataFrame:
     col_tonase_lahan  = _col_at(8)
     col_kg            = _col_at(9)
     col_harga_beli    = _col_at(11)
-    col_modal         = _col_at(15)
-    col_nota_balik    = _col_at(17)
+    # Dua kolom yang ikut geser dicari lewat nama header dulu, supaya kebal kalau ada
+    # kolom disisipkan lagi; posisi (Q = 16, S = 18) hanya cadangan kalau nama tidak ketemu.
+    col_modal         = _find_or_pos(["total modal"], 16)
+    col_nota_balik    = _find_or_pos(["total nota balik"], 18)
 
-    def _find_or_pos(names, idx):
-        for n in names:
-            m = [c for c in all_cols if c.strip().lower() == n.lower()]
-            if m:
-                return m[0]
-        return _col_at(idx)
-
-    col_omzet = _find_or_pos(["omzet", "total harga", "total_harga"], 17)
-    col_laba  = _find_or_pos(["laba", "keuntungan", "profit"], 18)
+    col_omzet = _find_or_pos(["omzet", "total harga", "total_harga"], 19)   # T
+    col_laba  = _find_or_pos(["laba", "keuntungan", "profit"], 20)          # U
 
     def _find(names):
         for n in names:
@@ -656,7 +673,7 @@ def load_penjualan_lapak_luar() -> pd.DataFrame:
         # sebagai nama kolom asli di sheet pada posisi lain, df[col] bisa mengembalikan
         # DataFrame (bukan Series) dan bikin to_number() error "arg must be a list,
         # tuple, 1-d array, or Series". Kolom pertama (posisi paling kiri) yang dipakai.
-        # (4 kolom baru posisi I/L/P/R sudah pakai nama internal unik _RAW_LUAR_... di
+        # (4 kolom baru posisi I/L/Q/S sudah pakai nama internal unik _RAW_LUAR_... di
         # atas justru supaya TIDAK pernah bentrok dengan kolom "Harga Beli"/"Modal"/dst
         # yang sudah ada duluan di sheet pada posisi lain.)
         df = df.loc[:, ~df.columns.duplicated()]
@@ -1934,10 +1951,29 @@ biaya_gh = (
 )
 laba_gh = omzet_gh - biaya_gh
 
-# Total di tab Summary = jumlah SEMUA yang tampil di Summary (Lapak, Lapak Luar,
-# Ekspedisi, Tanaman Panen, Green House).
-total_omzet = omzet_lapak + omzet_lapak_luar + omzet_ekspedisi + omzet_tanaman + omzet_gh
-total_laba  = laba_lapak + laba_lapak_luar + laba_ekspedisi + laba_tanaman + laba_gh
+# Pengeluaran Angsuran Mobil (sheet ARUS KAS), ikut rentang tanggal sidebar: jumlah KAS KELUAR
+# baris-baris yang kategorinya (kolom JENIS) memuat kata ANGSURAN (lihat KATA_JENIS_ANGSURAN di
+# atas). DIKURANGKAN dari Total Seluruh Laba di bawah.
+_kas_angsuran_ok = (
+    not df_kas_raw.empty and {"JENIS", "KAS KELUAR"} <= set(df_kas_raw.columns)
+)
+
+def _mask_jenis_angsuran(df):
+    return df["JENIS"].astype(str).str.contains(KATA_JENIS_ANGSURAN, case=False, regex=False, na=False)
+
+biaya_angsuran_mobil = 0
+jenis_angsuran_terbaca = []
+if _kas_angsuran_ok:
+    # Nama kategori yang kena (dari SELURUH sheet, bukan cuma periode terpilih) -- buat keterangan.
+    jenis_angsuran_terbaca = sorted(df_kas_raw.loc[_mask_jenis_angsuran(df_kas_raw), "JENIS"].dropna().unique())
+    if not df_kas.empty:
+        biaya_angsuran_mobil = df_kas.loc[_mask_jenis_angsuran(df_kas), "KAS KELUAR"].sum()
+
+# Total di tab Summary = jumlah SEMUA yang tampil di Summary (Lapak, Lapak Luar, Ekspedisi,
+# Tanaman Panen, Green House). Total Laba DIKURANGI Angsuran Mobil.
+total_omzet     = omzet_lapak + omzet_lapak_luar + omzet_ekspedisi + omzet_tanaman + omzet_gh
+laba_semua_unit = laba_lapak + laba_lapak_luar + laba_ekspedisi + laba_tanaman + laba_gh
+total_laba      = laba_semua_unit - biaya_angsuran_mobil
 
 # HEADER UTAMA
 st.title("📊 Dashboard Ratu Jaya")
@@ -1963,8 +1999,9 @@ tab1, tab2, tab2b, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab11, tab10 = st.t
 # TAB 1: SUMMARY
 with tab1:
     section_heading("🧮 Ringkasan Keseluruhan")
-    # Total = jumlah polos semua unit (lihat total_omzet / total_laba di atas); tidak
-    # ada perlakuan khusus kalau hasilnya minus -- warna kartu tetap.
+    # Omzet = jumlah polos semua unit. Laba = jumlah laba semua unit DIKURANGI Angsuran Mobil
+    # (lihat total_omzet / total_laba di atas); tidak ada perlakuan khusus kalau hasilnya
+    # minus -- warna kartu tetap.
     st.markdown(
         '<div class="hero-row">'
         + hero_card("💰 Total Seluruh Omzet", rp(total_omzet), "hero-blue")
@@ -1972,6 +2009,10 @@ with tab1:
         + '</div>',
         unsafe_allow_html=True
     )
+    if _kas_angsuran_ok:
+        st.caption("Total Seluruh Laba sudah dikurangi Angsuran Mobil (rincian di kartu 💸 di bawah).")
+    else:
+        st.caption("⚠️ Total Seluruh Laba BELUM dikurangi Angsuran Mobil karena data ARUS KAS tidak terbaca (lihat kartu 💸 di bawah).")
     st.write("")
 
     with st.container(border=True):
@@ -2012,6 +2053,21 @@ with tab1:
         gh3.metric("Laba Green House",         rp(laba_gh))
         if df_gh_kas_raw.empty or "Kas Masuk" not in df_gh_kas_raw.columns:
             st.caption("⚠️ Data Kas Masuk tidak ditemukan di sheet 'GREEN HOUSE KAS'.")
+
+    with st.container(border=True):
+        st.markdown('<div class="income-card-title">💸 Pengeluaran Angsuran Mobil</div>', unsafe_allow_html=True)
+        st.metric("Angsuran Mobil", rp(biaya_angsuran_mobil))
+        if _kas_angsuran_ok:
+            _kategori_angsuran = ", ".join(jenis_angsuran_terbaca) or "ANGSURAN MOBIL (belum ada di sheet)"
+            st.caption(
+                f"Total Seluruh Laba = laba semua unit ({rp(laba_semua_unit)}) − Angsuran Mobil. "
+                f"Sumber: sheet ARUS KAS, kolom KAS KELUAR, kategori (JENIS) {_kategori_angsuran}, sesuai rentang tanggal sidebar."
+            )
+        else:
+            st.caption(
+                "⚠️ Angsuran Mobil tidak bisa dibaca (sheet 'ARUS KAS' kosong atau kolom JENIS / KAS KELUAR tidak ditemukan), "
+                "jadi dianggap Rp 0 dan Total Seluruh Laba BELUM dikurangi Angsuran Mobil."
+            )
 
     st.divider()
     section_heading("📊 Komposisi Omzet & Laba Keseluruhan")
@@ -2068,6 +2124,7 @@ with tab1:
             textfont_size=14
         )
         st_plotly(fig_pie_laba, use_container_width=True)
+        st.caption("Komposisi ini dihitung dari laba tiap unit usaha (sebelum dikurangi Angsuran Mobil), jadi totalnya tidak sama dengan Total Seluruh Laba.")
         if _laba_negatif_pie:
             st.caption(
                 "Tidak tergambar di diagram karena laba negatif: "
@@ -3516,7 +3573,7 @@ with tab2b:
             tabel_pelanggan = tabel_pelanggan.rename(columns={"Margin_%": "% Margin Profit", NAMA_COL_LUAR: "Nama Pelanggan"})
             st.dataframe(tabel_pelanggan[["Nama Pelanggan", "Omzet", "Profit", "% Margin Profit"]], use_container_width=True, hide_index=True)
         else:
-            st.info("Kolom 'NAMA PELANGGAN' (kolom D), 'Total harga' (kolom S) dan/atau 'Keuntungan' (kolom T) tidak ditemukan di data penjualan lapak luar.")
+            st.info("Kolom 'NAMA PELANGGAN' (kolom D), 'Total harga' (kolom T, OMZET) dan/atau 'Keuntungan' (kolom U, LABA) tidak ditemukan di data penjualan lapak luar.")
 
         st.divider()
 
