@@ -704,6 +704,12 @@ def load_penjualan_lapak_luar() -> pd.DataFrame:
 
     df = _parse_tanggal(df)
 
+    # Tanggal_Transaksi = isi kolom A sheet apa adanya. Disimpan SEBELUM Tanggal_Lengkap
+    # di bawah diganti dengan tanggal nota balik: tabel Rincian perlu menampilkan kolom A
+    # (Tanggal) dan kolom B (Tanggal Nota Balik) secara terpisah, sedangkan filter sidebar
+    # dan grafik tetap mengikuti tanggal nota balik lewat Tanggal_Lengkap.
+    df["Tanggal_Transaksi"] = df["Tanggal_Lengkap"]
+
     if "TANGGAL NOTA BALIK" in df.columns:
         df["Tanggal_Nota_Balik"] = pd.to_datetime(_normalisasi_bulan_indo(df["TANGGAL NOTA BALIK"]), dayfirst=True, errors="coerce")
         # Filter tanggal sidebar (Omzet/Laba Lapak Luar) mengikuti TANGGAL NOTA
@@ -3299,8 +3305,12 @@ with tab2b:
             # tebal, tanpa garis dalam, sama seperti Total Omzet/Laba per Invoice).
             kolom_spec = []
             if "TANGGAL" in df_rincian_luar.columns:
-                if "Tanggal_Lengkap" in df_rincian_luar.columns:
-                    _tgl_fmt = df_rincian_luar["Tanggal_Lengkap"].dt.strftime("%d/%m/%Y")
+                # "Tanggal" = kolom A sheet (Tanggal_Transaksi). Bukan Tanggal_Lengkap: di data
+                # Lapak Luar kolom itu sengaja berisi TANGGAL NOTA BALIK (kolom B) untuk filter
+                # sidebar, jadi kalau dipakai di sini kolom "Tanggal" ikut menampilkan tanggal
+                # nota balik dan kembar dengan kolom "Tanggal Nota Balik" di sebelahnya.
+                if "Tanggal_Transaksi" in df_rincian_luar.columns:
+                    _tgl_fmt = df_rincian_luar["Tanggal_Transaksi"].dt.strftime("%d/%m/%Y")
                     _vals = _tgl_fmt.where(_tgl_fmt.notna(), df_rincian_luar["TANGGAL"]).fillna("")
                 else:
                     _vals = df_rincian_luar["TANGGAL"].fillna("")
