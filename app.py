@@ -740,7 +740,7 @@ def load_arus_kas() -> pd.DataFrame:
 
 @st.cache_data(ttl=300, show_spinner=False)
 def load_saldo_bank() -> dict:
-    # Saldo BRI (kolom J baris 3) & Saldo BCA (kolom K baris 3) di sheet ARUS KAS
+    # Saldo BRI (kolom J baris 3), Saldo BCA (kolom K baris 3) & Saldo BNI (kolom L baris 3) di sheet ARUS KAS
     # -- sel lepas di luar tabel transaksi utama, bukan bagian dari header row 1,
     # jadi dibaca langsung by posisi (header=None) tanpa lewat fetch_clean_csv/
     # fetch_raw_csv supaya baris tidak ikut ter-drop/bergeser oleh proses cleaning.
@@ -749,13 +749,19 @@ def load_saldo_bank() -> dict:
     try:
         df_raw = pd.read_csv(url, dtype=str, header=None)
     except Exception:
-        return {"bri": None, "bca": None}
+        return {"bri": None, "bca": None, "bni": None}
     try:
         saldo_bri = to_number(pd.Series([df_raw.iat[2, 9]])).iloc[0] if df_raw.shape[0] > 2 and df_raw.shape[1] > 9 else None
         saldo_bca = to_number(pd.Series([df_raw.iat[2, 10]])).iloc[0] if df_raw.shape[0] > 2 and df_raw.shape[1] > 10 else None
     except Exception:
         saldo_bri, saldo_bca = None, None
-    return {"bri": saldo_bri, "bca": saldo_bca}
+    try:
+        saldo_bni = to_number(pd.Series([df_raw.iat[2, 11]])).iloc[0] if df_raw.shape[0] > 2 and df_raw.shape[1] > 11 else None
+        if saldo_bni is not None and pd.isna(saldo_bni):
+            saldo_bni = None
+    except Exception:
+        saldo_bni = None
+    return {"bri": saldo_bri, "bca": saldo_bca, "bni": saldo_bni}
 
 @st.cache_data(ttl=300, show_spinner="Memuat Pengeluaran Lapak...")
 def load_pengeluaran_lapak() -> pd.DataFrame:
@@ -1637,7 +1643,7 @@ except Exception as e:
 try:
     saldo_bank_raw = load_saldo_bank()
 except Exception:
-    saldo_bank_raw = {"bri": None, "bca": None}
+    saldo_bank_raw = {"bri": None, "bca": None, "bni": None}
 
 try:
     df_status_perjalanan_raw = load_status_perjalanan()
@@ -2077,12 +2083,12 @@ with tab2:
             if "TUJUAN" in df_bm.columns and not df_bm.empty and is_filled(df_bm["TUJUAN"].iloc[0]):
                 gudang_invoice_rpi = str(df_bm["TUJUAN"].iloc[0]).strip()
 
-            # Modal Beli (Lahan) = SUM(Tonnase Lahan x Harga Modal) per baris di
-            # sheet BARANG_MASUK, untuk invoice terpilih.
+            # Modal Beli (Lahan) = SUM(Jumlah Grading (kolom N) x Harga Modal (kolom R))
+            # per baris di sheet BARANG_MASUK, untuk invoice terpilih.
             modal_beli_rpi = 0.0
-            if "TONNASE LAHAN" in df_bm.columns and "HARGA MODAL" in df_bm.columns:
+            if "TOTAL GRADING" in df_bm.columns and "HARGA MODAL" in df_bm.columns:
                 modal_beli_rpi = float(
-                    (to_number(df_bm["TONNASE LAHAN"]).fillna(0) * to_number(df_bm["HARGA MODAL"]).fillna(0)).sum()
+                    (to_number(df_bm["TOTAL GRADING"]).fillna(0) * to_number(df_bm["HARGA MODAL"]).fillna(0)).sum()
                 )
 
             # ---------- Tabel HIJAU: rekap level Gudang ----------
@@ -4282,14 +4288,17 @@ with tab6:
     with col_bank:
         bri_val = rp(saldo_bank_raw.get("bri")) if saldo_bank_raw.get("bri") is not None else "-"
         bca_val = rp(saldo_bank_raw.get("bca")) if saldo_bank_raw.get("bca") is not None else "-"
+        bni_val = rp(saldo_bank_raw.get("bni")) if saldo_bank_raw.get("bni") is not None else "-"
         st.markdown(f"""<table style="width:100%; border-collapse:collapse; text-align:center; margin-top:4px;">
 <tr>
 <th style="background:#2ca02c; color:#fff; padding:8px 10px; border:1px solid #cfe0cf; font-size:14px;">🏛️ SALDO BRI</th>
 <th style="background:#2ca02c; color:#fff; padding:8px 10px; border:1px solid #cfe0cf; font-size:14px;">🏛️ SALDO BCA</th>
+<th style="background:#2ca02c; color:#fff; padding:8px 10px; border:1px solid #cfe0cf; font-size:14px;">🏛️ SALDO BNI</th>
 </tr>
 <tr>
 <td style="padding:10px; border:1px solid #e0e6f0; font-weight:800; font-size:20px; color:#1f3864;">{bri_val}</td>
 <td style="padding:10px; border:1px solid #e0e6f0; font-weight:800; font-size:20px; color:#1f3864;">{bca_val}</td>
+<td style="padding:10px; border:1px solid #e0e6f0; font-weight:800; font-size:20px; color:#1f3864;">{bni_val}</td>
 </tr>
 </table>""", unsafe_allow_html=True)
 
